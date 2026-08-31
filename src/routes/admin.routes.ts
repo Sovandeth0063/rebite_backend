@@ -217,12 +217,119 @@ adminRouter.post('/admin/admins', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-adminRouter.delete('/admin/admins/:id', async (req: AuthenticatedRequest, res) => {
+// Dispute & Fraud Investigation Case
+adminRouter.post('/admin/open-case', async (req: AuthenticatedRequest, res) => {
+  const { orderIdentifier, reason } = req.body;
+  if (!orderIdentifier) {
+    return res.status(400).json({ error: 'Order identifier is required' });
+  }
+
   try {
-    await pool.query('DELETE FROM admin_users WHERE id = $1', [req.params.id]);
-    recordAuditLog(req.currentUser, 'REVOKE_ADMIN_USER', `Admin ID: ${req.params.id}`, 'Admin access revoked');
-    res.json({ success: true, message: 'Admin account revoked' });
+    const order = await queryOne(
+      'SELECT * FROM orders WHERE id = $1 OR order_number = $1 OR pickup_code = $1',
+      [orderIdentifier.trim()]
+    );
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order record not found for investigation' });
+    }
+
+    const logEntry = {
+      id: `log_${Date.now()}`,
+      adminId: req.currentUser?.id || 'adm_system',
+      adminEmail: req.currentUser?.email || 'admin@rescuebite.kh',
+      action: 'OPEN_DISPUTE_INVESTIGATION',
+      target: `Order: ${order.order_number || order.id}`,
+      details: reason || 'Dispute opened for review',
+      timestamp: new Date().toISOString(),
+    };
+
+    await pool.query(
+      `INSERT INTO audit_logs (id, admin_id, admin_email, action, target, details, timestamp)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        logEntry.id,
+        logEntry.adminId,
+        logEntry.adminEmail,
+        logEntry.action,
+        logEntry.target,
+        logEntry.details,
+        logEntry.timestamp,
+      ]
+    );
+
+    res.json({
+      success: true,
+      caseRecord: {
+        id: order.id,
+        orderNumber: order.order_number,
+        customerId: order.customer_id,
+        customerName: order.customer_name,
+        customerPhone: order.customer_phone,
+        merchantId: order.merchant_id,
+        merchantName: order.merchant_name,
+        rescueBagId: order.rescue_bag_id,
+        rescueBagTitle: order.rescue_bag_title,
+        quantity: order.quantity,
+        totalPrice: parseFloat(order.total_price),
+        orderStatus: order.order_status,
+        createdAt: order.created_at,
+      },
+      auditLogged: true,
+      logEntry,
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to revoke admin user' });
+    res.status(500).json({ error: 'Failed to open dispute case' });
+  }
+});
+
+// Admin Merchant status update alias
+adminRouter.post('/admin/merchants/:id/status', async (req: AuthenticatedRequest, res) => {
+  const { status, reason, rejectionReason } = req.body;
+  const finalReason = reason || rejectionReason;
+  try {
+    const existing = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Merchant not found' });
+    }
+
+    await pool.query(
+      `UPDATE merchants
+       SET status = $1, rejection_reason = $2
+       WHERE id = $3`,
+      [status, finalReason || null, req.params.id]
+    );
+
+    recordAuditLog(
+      req.currentUser,
+      `MERCHANT_${status}`,
+      `Merchant: ${existing.business_name}`,
+      `Status changed from ${existing.status} to ${status}. ${finalReason ? `Reason: ${finalReason}` : ''}`
+    );
+
+    const updated = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update merchant status' });
+  }
+});
+
+// Audit Logs (Root alias)
+adminRouter.get('/audit-logs', async (req, res) => {
+  try {
+    const rows = await query('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 50');
+    res.json(
+      rows.map((l) => ({
+        id: l.id,
+        adminId: l.admin_id,
+        adminEmail: l.admin_email,
+        action: l.action,
+        target: l.target,
+        details: l.details,
+        timestamp: l.timestamp,
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
   }
 });

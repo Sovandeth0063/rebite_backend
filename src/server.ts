@@ -24,7 +24,7 @@ import { reviewRouter } from './routes/review.routes.js';
 import { impactRouter } from './routes/impact.routes.js';
 import { aiRouter } from './routes/ai.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
-import { query } from './config/db.js';
+import { pool, query, queryOne } from './config/db.js';
 
 dotenv.config();
 
@@ -79,6 +79,9 @@ app.get('/api/users', async (req, res) => {
 });
 
 import { crudRouter } from './routes/crud.routes.js';
+import { settingsRouter } from './routes/settings.routes.js';
+import { bakongRouter } from './routes/bakong.routes.js';
+import { AuthenticatedRequest } from './middleware/auth.js';
 
 // Mount modular route handlers
 app.use('/api/auth', authRouter);
@@ -89,17 +92,76 @@ app.use('/api/reviews', reviewRouter);
 app.use('/api/impact', impactRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/crud', crudRouter);
+app.use('/api/settings', settingsRouter);
+app.use('/api/bakong', bakongRouter);
 app.use('/api', adminRouter);
 
-// Reset demo database to seed
-app.post('/api/reset', async (req, res) => {
+// Toggle Favorite Store
+app.post('/api/favorites/toggle', async (req: AuthenticatedRequest, res) => {
+  const { merchantId } = req.body;
+  if (!merchantId) {
+    return res.status(400).json({ error: 'merchantId is required' });
+  }
+
+  const userId = req.currentUser?.id || (req.headers['x-user-id'] as string) || 'usr_customer';
+  try {
+    const user = await queryOne('SELECT saved_store_ids FROM users WHERE id = $1', [userId]);
+    let savedStoreIds: string[] = user?.saved_store_ids || [];
+
+    if (savedStoreIds.includes(merchantId)) {
+      savedStoreIds = savedStoreIds.filter((id) => id !== merchantId);
+    } else {
+      savedStoreIds.push(merchantId);
+    }
+
+    if (user) {
+      await pool.query('UPDATE users SET saved_store_ids = $1 WHERE id = $2', [
+        JSON.stringify(savedStoreIds),
+        userId,
+      ]);
+    }
+
+    res.json({ savedStoreIds });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to toggle favorite store' });
+  }
+});
+
+// All Inventory endpoint (for Merchant view & surplus tracking)
+app.get('/api/inventory', async (req: AuthenticatedRequest, res) => {
+  try {
+    const rows = await query('SELECT * FROM inventory ORDER BY name ASC');
+    res.json(
+      rows.map((r) => ({
+        id: r.id,
+        merchantId: r.merchant_id,
+        name: r.name,
+        category: r.category,
+        stockQuantity: r.stock_quantity,
+        normalPrice: parseFloat(r.normal_price),
+        expiryDate: r.expiry_date,
+        expectedSales: r.expected_sales,
+        surplusRisk: r.surplus_risk,
+        recommendedAction: r.recommended_action,
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch inventory' });
+  }
+});
+
+// Reset demo database to seed (support both /api/reset and /api/demo/reset)
+const handleReset = async (req: any, res: any) => {
   try {
     await ensureDatabaseAndSchema();
     res.json({ success: true, message: 'Database reset to initial demo seeds.' });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to reset database', details: err.message });
   }
-});
+};
+
+app.post('/api/reset', handleReset);
+app.post('/api/demo/reset', handleReset);
 
 async function start() {
   console.log('[Backend] Starting RescueBite PostgreSQL Backend Service...');

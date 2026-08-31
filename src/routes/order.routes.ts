@@ -228,33 +228,128 @@ orderRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// Verify pickup code / QR scan
-orderRouter.post('/:id/verify-pickup', async (req, res) => {
-  const { pickupCode, qrCodeData } = req.body;
+// Global Scan QR / Pickup code verification endpoint
+orderRouter.post('/scan-qr', async (req, res) => {
+  const { code } = req.body;
+  if (!code || !code.trim()) {
+    return res.status(400).json({ error: 'Pickup code or QR token is required' });
+  }
+
+  const clean = code.trim();
   try {
-    const order = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const order = await queryOne(
+      `SELECT * FROM orders 
+       WHERE UPPER(pickup_code) = UPPER($1) 
+          OR order_number = $1 
+          OR qr_code_data = $1 
+          OR id = $1`,
+      [clean]
+    );
+
     if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+      return res.status(404).json({ error: 'No matching order found for this pickup code or QR token' });
     }
 
-    const isMatch =
-      (pickupCode && order.pickup_code.toUpperCase() === pickupCode.trim().toUpperCase()) ||
-      (qrCodeData && order.qr_code_data === qrCodeData.trim());
-
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid pickup code or QR token' });
+    if (order.order_status === 'COMPLETED') {
+      return res.json({
+        success: true,
+        message: 'Order was already marked completed.',
+        order: {
+          id: order.id,
+          orderNumber: order.order_number,
+          customerId: order.customer_id,
+          customerName: order.customer_name,
+          customerPhone: order.customer_phone,
+          merchantId: order.merchant_id,
+          merchantName: order.merchant_name,
+          rescueBagId: order.rescue_bag_id,
+          rescueBagTitle: order.rescue_bag_title,
+          quantity: order.quantity,
+          unitPrice: parseFloat(order.unit_price),
+          subtotal: parseFloat(order.subtotal),
+          totalPrice: parseFloat(order.total_price),
+          orderStatus: 'COMPLETED',
+          collectedAt: order.collected_at,
+          createdAt: order.created_at,
+        },
+        pointsEarned: order.quantity * 10,
+      });
     }
 
     await pool.query(
       `UPDATE orders
        SET order_status = 'COMPLETED', collected_at = $1
        WHERE id = $2`,
-      [new Date().toISOString(), req.params.id]
+      [new Date().toISOString(), order.id]
     );
 
+    const pointsEarned = (order.quantity || 1) * 10;
+    await pool.query('UPDATE users SET points = points + $1 WHERE id = $2', [pointsEarned, order.customer_id]);
+
+    const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [order.id]);
+
+    res.json({
+      success: true,
+      message: 'Pickup confirmed! Order completed successfully.',
+      order: {
+        id: updated.id,
+        orderNumber: updated.order_number,
+        customerId: updated.customer_id,
+        customerName: updated.customer_name,
+        customerPhone: updated.customer_phone,
+        merchantId: updated.merchant_id,
+        merchantName: updated.merchant_name,
+        rescueBagId: updated.rescue_bag_id,
+        rescueBagTitle: updated.rescue_bag_title,
+        quantity: updated.quantity,
+        unitPrice: parseFloat(updated.unit_price),
+        subtotal: parseFloat(updated.subtotal),
+        totalPrice: parseFloat(updated.total_price),
+        orderStatus: updated.order_status,
+        collectedAt: updated.collected_at,
+        createdAt: updated.created_at,
+      },
+      pointsEarned,
+    });
+  } catch (err: any) {
+    console.error('Error verifying pickup QR:', err);
+    res.status(500).json({ error: 'Failed to verify pickup code' });
+  }
+});
+
+// Cancel order endpoint
+orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
+  try {
+    const order = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (order.order_status === 'COMPLETED') {
+      return res.status(400).json({ error: 'Completed orders cannot be cancelled' });
+    }
+
+    await pool.query('UPDATE orders SET order_status = $1 WHERE id = $2', ['CANCELLED', req.params.id]);
+
+    // Restore bag inventory
+    if (order.rescue_bag_id && order.quantity) {
+      await pool.query('UPDATE rescue_bags SET quantity_remaining = quantity_remaining + $1 WHERE id = $2', [
+        order.quantity,
+        order.rescue_bag_id,
+      ]);
+    }
+
     const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
-    res.json({ success: true, message: 'Pickup confirmed! Order completed.', order: updated });
+    res.json({
+      id: updated.id,
+      orderNumber: updated.order_number,
+      orderStatus: updated.order_status,
+      customerId: updated.customer_id,
+      merchantId: updated.merchant_id,
+      totalPrice: parseFloat(updated.total_price),
+      createdAt: updated.created_at,
+    });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to verify pickup' });
+    res.status(500).json({ error: 'Failed to cancel order' });
   }
 });

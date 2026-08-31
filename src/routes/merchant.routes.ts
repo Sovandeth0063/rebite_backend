@@ -179,9 +179,92 @@ merchantRouter.post('/', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// Update merchant status (Admin)
-merchantRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
-  const { status, rejectionReason } = req.body;
+// Update merchant profile (PATCH & PUT)
+const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
+  const data = req.body;
+  try {
+    const existing = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Merchant not found' });
+    }
+
+    await pool.query(
+      `UPDATE merchants
+       SET business_name = COALESCE($1, business_name),
+           business_type = COALESCE($2, business_type),
+           owner_name = COALESCE($3, owner_name),
+           phone = COALESCE($4, phone),
+           email = COALESCE($5, email),
+           address = COALESCE($6, address),
+           district = COALESCE($7, district),
+           city = COALESCE($8, city),
+           logo_url = COALESCE($9, logo_url),
+           cover_url = COALESCE($10, cover_url),
+           description = COALESCE($11, description),
+           opening_hours = COALESCE($12, opening_hours),
+           pickup_window_default = COALESCE($13, pickup_window_default),
+           food_categories = COALESCE($14, food_categories)
+       WHERE id = $15`,
+      [
+        data.businessName,
+        data.businessType,
+        data.ownerName,
+        data.phone,
+        data.email,
+        data.address,
+        data.district,
+        data.city,
+        data.logoUrl,
+        data.coverUrl,
+        data.description,
+        data.openingHours,
+        data.pickupWindowDefault,
+        data.foodCategories ? JSON.stringify(data.foodCategories) : null,
+        req.params.id,
+      ]
+    );
+
+    const updated = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
+    res.json({
+      id: updated.id,
+      userId: updated.user_id,
+      businessName: updated.business_name,
+      businessName_en: updated.business_name_en,
+      businessName_km: updated.business_name_km,
+      businessType: updated.business_type,
+      ownerName: updated.owner_name,
+      phone: updated.phone,
+      email: updated.email,
+      address: updated.address,
+      district: updated.district,
+      city: updated.city,
+      latitude: updated.latitude,
+      longitude: updated.longitude,
+      logoUrl: updated.logo_url,
+      coverUrl: updated.cover_url,
+      description: updated.description,
+      rating: updated.rating,
+      reviewCount: updated.review_count,
+      openingHours: updated.opening_hours,
+      pickupWindowDefault: updated.pickup_window_default,
+      status: updated.status,
+      rejectionReason: updated.rejection_reason,
+      joinedDate: updated.joined_date,
+      foodCategories: updated.food_categories || [],
+    });
+  } catch (err: any) {
+    console.error('Error updating merchant:', err);
+    res.status(500).json({ error: 'Failed to update merchant profile' });
+  }
+};
+
+merchantRouter.patch('/:id', handleUpdateMerchant);
+merchantRouter.put('/:id', handleUpdateMerchant);
+
+// Update merchant status (Admin) - Support PUT, PATCH, POST
+const handleUpdateStatus = async (req: AuthenticatedRequest, res: any) => {
+  const { status, rejectionReason, reason } = req.body;
+  const finalReason = rejectionReason || reason;
   try {
     const existing = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
     if (!existing) {
@@ -192,14 +275,14 @@ merchantRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
       `UPDATE merchants
        SET status = $1, rejection_reason = $2
        WHERE id = $3`,
-      [status, rejectionReason || null, req.params.id]
+      [status, finalReason || null, req.params.id]
     );
 
     recordAuditLog(
       req.currentUser,
       `MERCHANT_${status}`,
       `Merchant: ${existing.business_name}`,
-      `Status changed from ${existing.status} to ${status}. ${rejectionReason ? `Reason: ${rejectionReason}` : ''}`
+      `Status changed from ${existing.status} to ${status}. ${finalReason ? `Reason: ${finalReason}` : ''}`
     );
 
     const updated = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
@@ -207,7 +290,11 @@ merchantRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to update merchant status' });
   }
-});
+};
+
+merchantRouter.put('/:id/status', handleUpdateStatus);
+merchantRouter.patch('/:id/status', handleUpdateStatus);
+merchantRouter.post('/:id/status', handleUpdateStatus);
 
 // Inventory
 merchantRouter.get('/:id/inventory', async (req, res) => {

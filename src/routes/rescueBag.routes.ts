@@ -215,8 +215,8 @@ rescueBagRouter.post('/', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// Update rescue bag
-rescueBagRouter.put('/:id', async (req, res) => {
+// Update rescue bag (PUT & PATCH)
+const handleUpdateRescueBag = async (req: any, res: any) => {
   const data = req.body;
   try {
     await pool.query(
@@ -243,7 +243,10 @@ rescueBagRouter.put('/:id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to update rescue bag' });
   }
-});
+};
+
+rescueBagRouter.put('/:id', handleUpdateRescueBag);
+rescueBagRouter.patch('/:id', handleUpdateRescueBag);
 
 // Delete rescue bag
 rescueBagRouter.delete('/:id', async (req, res) => {
