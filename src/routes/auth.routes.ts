@@ -31,13 +31,14 @@ authRouter.post('/login', async (req, res) => {
     let user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
 
     if (!user) {
+      const isAdminEmail = email.trim().toLowerCase().startsWith('admin@');
       const newUser = {
         id: `usr_${Date.now()}`,
         email: email.trim(),
         name: email.split('@')[0],
-        role: role || 'CUSTOMER',
+        role: role || (isAdminEmail ? 'ADMIN' : 'CUSTOMER'),
         phone: '+855 12 000 000',
-        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+        avatar_url: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
         language: 'en',
         points: 50,
         referral_code: 'RESCUE' + Math.floor(1000 + Math.random() * 9000),
@@ -189,8 +190,15 @@ authRouter.post('/register', async (req, res) => {
   }
 });
 
-// Profile
+// Profile & Me
 authRouter.get('/profile', async (req: AuthenticatedRequest, res) => {
+  if (!req.currentUser) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.json(req.currentUser);
+});
+
+authRouter.get('/me', async (req: AuthenticatedRequest, res) => {
   if (!req.currentUser) {
     return res.status(401).json({ error: 'Unauthorized' });
   }

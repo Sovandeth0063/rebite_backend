@@ -33,7 +33,8 @@ export const adminApi = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Authentication failed. Invalid admin credentials.');
     }
-    const user: User = await res.json();
+    const data = await res.json();
+    const user: User = data.user || data;
     if (user.role !== 'ADMIN') {
       throw new Error('Access denied. This portal is restricted to authorized RescueBite Administrators only.');
     }
@@ -43,9 +44,10 @@ export const adminApi = {
 
   getCurrentAdmin: async (): Promise<User | null> => {
     if (!currentAdminId) return null;
-    const res = await fetch('/api/auth/me', { headers: authHeaders() });
+    const res = await fetch('/api/auth/profile', { headers: authHeaders() });
     if (!res.ok) return null;
-    const user: User = await res.json();
+    const data = await res.json();
+    const user: User = data.user || data;
     if (user.role !== 'ADMIN') return null;
     return user;
   },
