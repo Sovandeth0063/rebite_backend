@@ -211,64 +211,7 @@ export async function setupDatabase(forceRecreate: boolean = false) {
       ]
     );
 
-    // 5. Seed Demo Order
-    await pool.query(
-      `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, collected_at, review_given, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        'ord_demo_1',
-        'RB-2026-000088',
-        'usr_customer',
-        'Dara Sok',
-        '+855 12 345 678',
-        'mer_kayser',
-        'Maison Kayser Cambodia (BKK1)',
-        'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200',
-        '219 E0, Street 63 (corner of Street 322), BKK1, Phnom Penh',
-        'bag_kayser_1',
-        'French Artisan Bakery Surprise Box',
-        1,
-        3.5,
-        3.5,
-        0.5,
-        4.0,
-        '2026-02-28',
-        '18:30 - 20:00',
-        'ABA_PAY',
-        'PAID',
-        'COMPLETED',
-        'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=RB-2026-000088-PICKUP',
-        'RB-2026-000088-PICKUP',
-        'RB-0088',
-        new Date().toISOString(),
-        true,
-        new Date().toISOString(),
-      ]
-    );
-
-    // 6. Seed Demo Review
-    await pool.query(
-      `INSERT INTO reviews (id, order_id, merchant_id, customer_id, customer_name, customer_avatar, rating, comment, food_quality_rating, value_rating, pickup_experience_rating, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        'rev_1',
-        'ord_demo_1',
-        'mer_kayser',
-        'usr_customer',
-        'Dara Sok',
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-        5,
-        'The croissants and sourdough loaf were incredibly fresh! Huge savings and great sustainability concept.',
-        5,
-        5,
-        5,
-        new Date().toISOString(),
-      ]
-    );
-
-    // 7. Seed Admin User
+    // 5. Seed Admin User
     await pool.query(
       `INSERT INTO admin_users (id, name, email, role_level, two_factor_enforced, created_at)
        VALUES ($1, $2, $3, $4, $5, $6)
