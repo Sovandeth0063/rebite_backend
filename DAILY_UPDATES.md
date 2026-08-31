@@ -8,8 +8,35 @@
 
 ## 🚀 Summary of Key Accomplishments Today
 
-### 1. 🥐 Migration of 8 Real Phnom Penh Bakeries & Surplus Bags
-- Discovered and populated 8 real bakeries, cafés, and supermarkets across Phnom Penh offering daily end-of-day discounts (50%–70% off):
+### 1. 🧮 100% Pure Deterministic Mathematical Forecasting Engine
+- **$0.00 Operational Cost & Instant Speed (< 0.2ms):** Fully replaced external LLM / Google Gemini calls for surplus forecasting with local deterministic statistical algorithms.
+- **Clamped Dynamic Markdown Pricing:**
+  $$\text{Discount } \% = \max\left(30\%, \min\left(70\%, \text{round}(0.40 + (U \times 0.20) + (C_{\text{decay}} \times 0.10))\right)\right)$$
+  - Dynamically calculates discounts based on remaining hours to close ($H_{\text{rem}}$) and category perishability factor ($C_{\text{decay}}$).
+- **Hourly Sales Velocity ($V_{\text{hourly}}$):** Derived from store's completed 30-day order volume in PostgreSQL with robust operating schedule string parsing (`parseOperatingSchedule`) and cold-start category prior defaults.
+- **Tomorrow's Production Batch Optimizer:**
+  $$\Delta \text{Bake Final} = -\min(\text{Current Batch} \times 0.40, \text{round}(P_{\text{surplus}} \times 0.60))$$
+  - Eliminates over-baking waste while strictly capping batch reductions at $\le 40\%$ to prevent morning shortages.
+- **Automated Verification Test Suite:** Added [`test_forecast_engine.ts`](file:///e:/First_Wave/backend/src/tests/test_forecast_engine.ts) testing 15 real-world bakery scenarios — **15 / 15 tests passing**.
+
+---
+
+### 2. 💼 Lean Canvas Business Alignment (AIM Growth Model)
+- **15% Performance-Based Platform Commission:** Merchants pay zero upfront or fixed fees. Commission is calculated solely upon successful bag collection.
+- **Merchant Revenue Recovery & Commission Breakdown:** Integrated into Merchant BI tab displaying Gross Recovered Revenue ($ & KHR), Platform Commission, and Net Payout to ABA / Bakong.
+- **1-Click Telegram Drop Alert Tool:** Added a one-click copy tool formatted for Telegram channels & groups with bilingual Khmer/English copy to drive immediate local store traffic.
+- **Customer Discovery Quick Filters:** Added `🎓 Under $3.50 (~14k KHR)` and `🌙 Evening Rush (5PM+)` filter pills for quick discovery.
+
+---
+
+### 3. 🗄️ Admin Studio Overview Entity Navigation (Port 3002)
+- **Fixed Table Entity Routing:** Resolved an issue where clicking `users`, `orders`, or other tables in the Overview dashboard always defaulted to `merchants`.
+- **Direct Navigation:** Clicking any database table card in Dashboard Overview now directly navigates to and selects that exact schema in the Database Studio (CRUD) interface.
+
+---
+
+### 4. 🥐 8 Real Phnom Penh Bakeries & Surplus Bags Seed Data
+- Populated 8 real bakeries, cafés, and supermarkets across Phnom Penh offering daily end-of-day discounts (50%–70% off):
   1. **La Brioche Bakery (Hotel Cambodiana)** — Sisowath Quay, Daun Penh *(French luxury pastries, fruit tarts, eclairs)*
   2. **Maison Kayser Cambodia (BKK1)** — St 282, Boeung Keng Kang 1 *(Artisan sourdough, butter croissants, baguette sandwiches)*
   3. **BROWN Coffee and Bakery (BKK1)** — St 57, BKK1 *(Specialty iced espresso, cheese croissants, muffins)*
@@ -22,95 +49,86 @@
 
 ---
 
-### 2. 🗄️ Database & PostgreSQL UTF-8 Cluster
-- Initialized a standalone PostgreSQL cluster with `UTF-8` client encoding and `locale=C` to flawlessly store Khmer script (`ភាសាខ្មែរ`) alongside English text.
+### 5. 🛡️ Database & PostgreSQL UTF-8 Cluster
+- Initialized standalone PostgreSQL cluster with `UTF-8` client encoding and `locale=C` to flawlessly store Khmer script (`ភាសាខ្មែរ`) alongside English text.
 - Configured relational tables: `users`, `merchants`, `rescue_bags`, `orders`, `order_items`, `reviews`, `impact_stats`, `reports`, `inventory`, `ai_recommendations`, `notifications`, `customer_settings`, `merchant_settings`, `platform_config`, and `admin_users`.
 
 ---
 
-### 3. 🛡️ Standalone Admin Database CRUD Studio (Port 3002)
-- Decoupled the administrative database inspection studio from the consumer website.
-- Created a separate administrative application running independently on `http://localhost:3002`.
-- Added authentication protection requiring administrator credentials (`admin@rescuebite.kh` / `admin@rescuebite.com`).
-- Implemented live record viewing, search, creation, editing, and deletion across all 15 database tables.
+### 6. 👤 Clean Authentication & Demo Role Removal
+- Strictly removed demo bypasses from navigation and login handlers.
+- Enforced clean user registration with authentic credentials.
+- Every new user starts at **`0 pts`** with clean activity tracking.
 
 ---
 
-### 4. 🧹 Seed Data Sanitization & Demo Cleanup
-- Removed legacy demo customer accounts (`usr_customer` / "Dara Sok") from seed files and database.
-- Cleaned foreign key constraints in database provisioning scripts to ensure orphaned records do not block automated tests.
-- Replaced 1-click demo bypass with authentic authentication flows.
+## 🛠️ How to Set Up & Run the Project (For Teammates / Integrators)
+
+### 1. Start Database & Backend API (Port 5000)
+```bash
+cd backend
+npm install
+npm run build
+# Start PostgreSQL (auto-managed if using local pgdata) and launch backend
+npm run dev
+```
+
+### 2. Run Mathematical Test Suite
+```bash
+cd backend
+node dist/tests/test_forecast_engine.js
+```
+
+### 3. Start Consumer Web Application (Port 3001)
+```bash
+cd ReBite
+npm install
+npm run dev
+```
+Open `http://localhost:3001` in your browser.
+
+### 4. Start Admin CRUD Studio (Port 3002)
+```bash
+cd backend/admin
+npm install
+npm run dev
+```
+Open `http://localhost:3002` in your browser.  
+**Admin Credentials:** `admin@rescuebite.kh` / `admin@rescuebite.com` | Password: `password123`
 
 ---
 
-### 5. 🤖 Continuous Integration (GitHub Actions CI)
-- Added GitHub Actions CI pipelines to both repositories:
-  - **Frontend CI (`.github/workflows/ci.yml`):** Runs TypeScript typechecks (`tsc --noEmit`) and Vite production builds on every push/PR.
-  - **Backend CI (`.github/workflows/ci.yml`):** Runs automated PostgreSQL service container, database schema migrations, and API endpoint verification.
+## 📦 Verified Seed Accounts for Testing
 
----
-
-### 6. 👤 Authentic User Registration & Profile Data
-- **Removed Fake Auto-Generation:** Fixed backend login endpoint so unregistered emails are not silently created with dummy placeholder names or fake phone numbers.
-- **Clean Registration:** Registration strictly captures user's actual **Full Name**, **Phone Number**, **Email**, **Password**, and **Role** (Customer or Merchant).
-- **Eliminated Fake Default Avatars:** Removed hardcoded stock Unsplash photos. Brand new accounts cleanly display user monogram initials (e.g. `SO`) or a clean icon unless the user explicitly uploads a custom photo.
-- **Removed Redundant Settings Screen:** Deleted the broken, separate `SettingsView.tsx` screen and consolidated all profile and account settings directly into `ProfileView.tsx`.
-
----
-
-### 7. 🎁 Clean Slate for New Accounts (`0 pts`)
-- Updated registration defaults so every new user starts at **`0 pts`** instead of pre-filled mock points.
-- Fixed points calculation in `RewardsView.tsx` to handle 0 points cleanly without defaulting to mock balances.
-- Points history starts clean and records real customer rescues and reviews.
-
----
-
-### 8. 📍 Location Permission Prompt on Website Startup
-- Integrated automatic browser location request (`navigator.geolocation.getCurrentPosition`) every time the website opens.
-- Added an accessible, polite top banner prompting users to allow location access if permission was dismissed.
-- Implemented real-time GPS distance calculation (km) from user's live position to nearby bakeries in Phnom Penh, with accurate **"Distance: Nearest"** sorting.
-
----
-
-### 9. 🗂️ Category Navigation & Multi-Category Filtering
-- Fixed category cards on the Landing Page (*Bakery & Pastries*, *Breakfast & Brunch*, *Dessert*, *Dinner*, *Groceries*, *Lunch*, *Fruits & Vegetables*, *Meals*).
-- Clicking any category navigates to Explore Food with that specific category active.
-- Added smart multi-category matching in `CustomerView.tsx` to filter products and bakeries accurately.
-
----
-
-### 10. ⚡ Bug Fixes & Stability
-- **Fixed White Screen on "View List" Click:** Resolved a React SyntheticEvent propagation issue where clicking `[ View list ]` passed the mouse event object into category filters, causing a `.toLowerCase()` crash.
-- Added type guards and sanitization across all navigation buttons.
-- Successfully built both frontend applications with **0 TypeScript compiler errors**.
+| Role | Email | Password | Details |
+|---|---|---|---|
+| **Admin** | `admin@rescuebite.kh` | `password123` | Full access to Database Studio & CRUD |
+| **Merchant** | `merchant@rescuebite.kh` | `password123` | Store owner for *Artisan Boulangerie & Café* |
+| **Customer** | Register new account or use any verified email | `password123` | Starts with 0 pts and clean history |
 
 ---
 
 ## 📊 Summary of Modified Files
 
-### Frontend (`ReBite`)
-- `src/App.tsx` — Geolocation on startup, category routing state, clean error guards.
-- `src/components/LandingPage.tsx` — Category card click handlers, arrow-wrapped CTAs.
-- `src/components/CustomerView.tsx` — Live GPS distance calculation, multi-category matching, string type guards.
-- `src/components/Header.tsx` — Consolidated profile menu, clean monogram avatar badges.
-- `src/components/ProfileView.tsx` — Removed preset stock photos & URL inputs; streamlined personal info editing.
-- `src/components/RewardsView.tsx` — 0-point initialization, clean activity history.
-- `src/components/LoginPage.tsx` — Validated login/signup flows without placeholder fallbacks.
-- `src/components/SettingsView.tsx` — Removed redundant component.
-- `src/data/seedData.ts` & `src/types/index.ts` — 8 Phnom Penh bakeries, surprise bags, updated types.
-- `.github/workflows/ci.yml` — Frontend CI workflow.
+### Backend (`rebite_backend`)
+- `src/services/forecastingEngine.ts` **[NEW]** — 100% deterministic mathematical forecasting & dynamic pricing engine.
+- `src/tests/test_forecast_engine.ts` **[NEW]** — 15-scenario automated verification test suite.
+- `src/controllers/ai.controller.ts` **[MODIFY]** — Express controller wired to pure math engine.
+- `src/routes/ai.routes.ts` **[MODIFY]** — Route definitions delegating to controller.
+- `src/services/gemini.ts` **[MODIFY]** — Lightweight interface delegating to math engine.
+- `src/services/translation.ts` **[MODIFY]** — Dedicated bilingual translation handler.
+- `src/routes/merchant.routes.ts` **[MODIFY]** — Analytics calculation (15% commission, net payout in USD/KHR).
+- `src/routes/auth.routes.ts` **[MODIFY]** — Removed demo role switcher bypass; strict authentic auth.
+- `src/db/createDb.ts` **[MODIFY]** — Database provisioning with 8 Phnom Penh bakeries.
 
-### Backend (`backend`)
-- `src/routes/auth.routes.ts` — Authentic registration/login handlers, `0 pts` initial balance, clean avatars.
-- `src/routes/crud.routes.ts` — Dynamic CRUD table endpoints and search filtering.
-- `src/db/createDb.ts` — UTF-8 database provisioning.
-- `src/db/schema.sql` & `src/db/setup.ts` — Complete database schema and clean seeding without demo dependencies.
-- `src/data/seedData.ts` & `src/types/index.ts` — Phnom Penh bakery dataset and TypeScript models.
-- `admin/` — Standalone Admin CRUD Studio on Port 3002.
-- `.github/workflows/ci.yml` — Backend PostgreSQL CI workflow.
+### Admin Studio (`backend/admin`)
+- `src/App.tsx` **[MODIFY]** — Added `selectedTable` state synchronization across views.
+- `src/components/DashboardOverview.tsx` **[MODIFY]** — Wired table entity cards to pass schema names directly.
+- `src/components/DatabaseStudioView.tsx` **[MODIFY]** — Accepted `initialTable` and synced active schema on navigation.
 
----
-
-## ✅ Remote Repository Status
-- **`ReBite`:** Clean working tree, pushed to `origin/sovandeth`.
-- **`rebite_backend`:** Clean working tree, pushed to `origin/main`.
+### Frontend App (`ReBite`)
+- `src/components/MerchantView.tsx` **[MODIFY]** — AI Surplus Forecaster tab, Revenue Recovery breakdown card, Telegram 1-click share.
+- `src/components/CustomerView.tsx` **[MODIFY]** — Added Evening Rush and Under $3.50 filter chips.
+- `src/components/Header.tsx` **[MODIFY]** — Removed demo role switcher.
+- `src/components/DemoRoleSwitcher.tsx` **[DELETE]** — Removed unused demo component.
+- `src/services/api.ts` & `src/types/index.ts` **[MODIFY]** — Added `forecastSurplus` and `getMerchantAnalytics` API calls and types.

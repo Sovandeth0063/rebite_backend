@@ -296,6 +296,56 @@ merchantRouter.put('/:id/status', handleUpdateStatus);
 merchantRouter.patch('/:id/status', handleUpdateStatus);
 merchantRouter.post('/:id/status', handleUpdateStatus);
 
+// Merchant Analytics & Revenue Recovery Breakdown (Lean Canvas Model)
+merchantRouter.get('/:id/analytics', async (req, res) => {
+  const merchantId = req.params.id;
+  try {
+    const [orders, merchant] = await Promise.all([
+      query('SELECT * FROM orders WHERE merchant_id = $1', [merchantId]),
+      queryOne('SELECT * FROM merchants WHERE id = $1', [merchantId]),
+    ]);
+
+    const completedOrders = orders.filter((o) => o.order_status === 'COMPLETED' || o.order_status === 'READY_FOR_PICKUP');
+    const totalBagsSold = completedOrders.reduce((sum, o) => sum + (o.quantity || 1), 0);
+    const grossRevenueUsd = completedOrders.reduce((sum, o) => sum + parseFloat(o.subtotal || o.total_price || '0'), 0);
+    const commissionRate = 0.15; // 15% platform fee
+    const commissionAmountUsd = parseFloat((grossRevenueUsd * commissionRate).toFixed(2));
+    const netPayoutUsd = parseFloat((grossRevenueUsd - commissionAmountUsd).toFixed(2));
+    const foodRescuedKg = parseFloat((totalBagsSold * 0.75).toFixed(1));
+    const co2AvoidedKg = parseFloat((totalBagsSold * 1.8).toFixed(1));
+
+    // Calculate customer repeat rate
+    const customerMap = new Map<string, number>();
+    completedOrders.forEach((o) => {
+      customerMap.set(o.customer_id, (customerMap.get(o.customer_id) || 0) + 1);
+    });
+    const totalUniqueCustomers = customerMap.size;
+    const repeatCustomers = Array.from(customerMap.values()).filter((cnt) => cnt > 1).length;
+    const repeatRatePercentage = totalUniqueCustomers > 0 ? Math.round((repeatCustomers / totalUniqueCustomers) * 100) : 0;
+
+    res.json({
+      merchantId,
+      merchantName: merchant?.business_name || 'Phnom Penh Partner Bakery',
+      totalOrders: completedOrders.length,
+      totalBagsSold,
+      grossRevenueUsd,
+      grossRevenueKhr: Math.round(grossRevenueUsd * 4100),
+      commissionRatePercentage: 15,
+      commissionAmountUsd,
+      netPayoutUsd,
+      netPayoutKhr: Math.round(netPayoutUsd * 4100),
+      foodRescuedKg,
+      co2AvoidedKg,
+      totalUniqueCustomers,
+      repeatRatePercentage,
+      currencyRateKhr: 4100,
+    });
+  } catch (err: any) {
+    console.error('Error fetching merchant analytics:', err);
+    res.status(500).json({ error: 'Failed to fetch merchant analytics' });
+  }
+});
+
 // Inventory
 merchantRouter.get('/:id/inventory', async (req, res) => {
   try {

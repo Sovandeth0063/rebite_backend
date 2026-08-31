@@ -1,34 +1,20 @@
 /**
  * ============================================================================
  * File: src/routes/ai.routes.ts
- * Purpose: Gemini AI Smart Food Waste & Pricing Assistant Endpoints
+ * Purpose: AI Food Waste Assistant & Surplus Forecaster Route Definitions
  * Endpoints:
- *   - POST /api/ai/ask -> Sends prompt with business inventory context to Gemini AI assistant
+ *   - POST /api/ai/ask -> Delegates to aiController.askAssistant
+ *   - POST /api/ai/forecast-surplus -> Delegates to aiController.forecastSurplus
  * ============================================================================
  */
 
 import { Router } from 'express';
-import { query } from '../config/db.js';
-import { askAiFoodWasteAssistant } from '../services/gemini.js';
+import { aiController } from '../controllers/ai.controller.js';
 
 export const aiRouter = Router();
 
-// Ask AI Food Waste Assistant
-aiRouter.post('/ask', async (req, res) => {
-  const { prompt, businessName, businessType, city } = req.body;
-  try {
-    const inventory = await query('SELECT * FROM inventory LIMIT 10');
+// Ask Conversational AI Assistant
+aiRouter.post('/ask', (req, res) => aiController.askAssistant(req, res));
 
-    const answer = await askAiFoodWasteAssistant(prompt, {
-      businessName: businessName || 'Phnom Penh Artisan Bakery',
-      businessType: businessType || 'Bakery',
-      city: city || 'Phnom Penh',
-      inventory,
-    });
-
-    res.json({ answer });
-  } catch (err: any) {
-    console.error('AI route error:', err);
-    res.status(500).json({ error: 'AI Assistant error' });
-  }
-});
+// AI Smart Surplus & Production Demand Forecaster
+aiRouter.post('/forecast-surplus', (req, res) => aiController.forecastSurplus(req, res));

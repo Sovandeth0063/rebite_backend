@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 interface DashboardOverviewProps {
-  onNavigateTab: (tab: 'STUDIO' | 'MERCHANTS' | 'LOGS') => void;
+  onNavigateTab: (tab: 'STUDIO' | 'MERCHANTS' | 'LOGS', table?: string) => void;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigateTab }) => {
@@ -162,7 +162,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
           {tables.slice(0, 12).map((tbl) => (
             <button
               key={tbl.name}
-              onClick={() => onNavigateTab('STUDIO')}
+              onClick={() => onNavigateTab('STUDIO', tbl.name)}
               className="p-3 bg-neutral-950 hover:bg-neutral-800/80 border border-neutral-800 rounded-xl text-left transition-all group cursor-pointer space-y-1"
             >
               <div className="text-xs font-bold text-neutral-200 group-hover:text-emerald-400 font-mono truncate">

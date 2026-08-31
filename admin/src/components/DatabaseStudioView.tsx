@@ -26,15 +26,29 @@ import {
   Filter,
 } from 'lucide-react';
 
-export const DatabaseStudioView: React.FC = () => {
+interface DatabaseStudioViewProps {
+  initialTable?: string;
+  onSelectTable?: (table: string) => void;
+}
+
+export const DatabaseStudioView: React.FC<DatabaseStudioViewProps> = ({
+  initialTable = 'merchants',
+  onSelectTable,
+}) => {
   const [tables, setTables] = useState<TableMeta[]>([]);
-  const [selectedTable, setSelectedTable] = useState<string>('merchants');
+  const [selectedTable, setSelectedTable] = useState<string>(initialTable);
   const [tableSearch, setTableSearch] = useState('');
   const [rows, setRows] = useState<any[]>([]);
   const [currentTableMeta, setCurrentTableMeta] = useState<TableMeta | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialTable && initialTable !== selectedTable) {
+      setSelectedTable(initialTable);
+    }
+  }, [initialTable]);
 
   // Search & Sorting & Pagination
   const [searchQuery, setSearchQuery] = useState('');
