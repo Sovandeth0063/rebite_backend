@@ -35,11 +35,16 @@ export async function ensureDatabaseAndSchema() {
 
   try {
     await rootClient.connect();
-    const checkDb = await rootClient.query('SELECT 1 FROM pg_database WHERE datname = $1', [targetDb]);
+    const checkDb = await rootClient.query('SELECT 1, pg_encoding_to_char(encoding) as enc FROM pg_database WHERE datname = $1', [targetDb]);
     if (checkDb.rows.length === 0) {
-      console.log(`[PostgreSQL] Database "${targetDb}" not found. Creating database...`);
-      await rootClient.query(`CREATE DATABASE "${targetDb}"`);
-      console.log(`[PostgreSQL] Database "${targetDb}" created successfully.`);
+      console.log(`[PostgreSQL] Database "${targetDb}" not found. Creating database with UTF-8 encoding...`);
+      await rootClient.query(`CREATE DATABASE "${targetDb}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`);
+      console.log(`[PostgreSQL] Database "${targetDb}" created successfully with UTF-8 encoding.`);
+    } else if (checkDb.rows[0].enc !== 'UTF8') {
+      console.log(`[PostgreSQL] Database "${targetDb}" is in ${checkDb.rows[0].enc}. Recreating with UTF-8...`);
+      await rootClient.query(`DROP DATABASE "${targetDb}" WITH (FORCE)`);
+      await rootClient.query(`CREATE DATABASE "${targetDb}" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`);
+      console.log(`[PostgreSQL] Database "${targetDb}" recreated successfully with UTF-8.`);
     }
   } catch (err: any) {
     console.warn(`[PostgreSQL] Root DB check warning: ${err.message}`);
