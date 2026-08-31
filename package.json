@@ -1,0 +1,38 @@
+{
+  "name": "rescuebite-backend",
+  "version": "1.0.0",
+  "description": "RescueBite Cambodia - Standalone PostgreSQL Express Backend Service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:setup": "tsx src/db/setup.ts",
+    "db:start": "powershell -Command \"Start-Process 'C:\\Program Files\\PostgreSQL\\14\\bin\\postgres.exe' -ArgumentList '-D', 'e:\\First_Wave\\backend\\pgdata' -WindowStyle Hidden\"",
+    "db:stop": "\"C:\\Program Files\\PostgreSQL\\14\\bin\\pg_ctl.exe\" -D e:\\First_Wave\\backend\\pgdata stop"
+  },
+  "scriptsComments": {
+    "dev": "Runs development server with hot reload via tsx on port 5000",
+    "build": "Compiles TypeScript files into dist/ folder",
+    "start": "Runs compiled production server from dist/server.js",
+    "db:setup": "Executes PostgreSQL DDL migrations and seeds initial demo data",
+    "db:start": "Starts the dedicated local PostgreSQL database server on port 5432",
+    "db:stop": "Stops the dedicated local PostgreSQL database server"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.11.11",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  }
+}
