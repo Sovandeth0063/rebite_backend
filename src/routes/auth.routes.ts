@@ -127,7 +127,7 @@ authRouter.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'An account with this email already exists. Please log in.' });
     }
 
-    let initialPoints = role === 'CUSTOMER' ? 50 : 0;
+    let initialPoints = 0;
     let referredBy: string | undefined;
 
     if (referralCode) {
