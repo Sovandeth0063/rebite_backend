@@ -22,72 +22,54 @@ export const authRouter = Router();
 
 // Login
 authRouter.post('/login', async (req: AuthenticatedRequest, res) => {
-  const { email, password, role } = req.body;
+  const { email, password } = req.body;
+
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Email address is required to log in.' });
+  }
 
   try {
-    let user: any = null;
+    let user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
 
-    if (!email || !email.trim()) {
-      if (role) {
-        // Role switch requested
-        if (req.currentUser) {
-          await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, req.currentUser.id]);
-          user = await queryOne('SELECT * FROM users WHERE id = $1', [req.currentUser.id]);
-        } else {
-          // Find any user with that role
-          user = await queryOne('SELECT * FROM users WHERE role = $1 ORDER BY created_at ASC LIMIT 1', [role]);
-        }
-      }
-
-      if (!user) {
-        return res.status(400).json({ error: 'Email address is required' });
-      }
-    } else {
-      user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
-
-      if (!user) {
-        const emailLower = email.trim().toLowerCase();
-        // Auto-provision admin credentials if needed for platform administration
-        if (emailLower === 'admin@rescuebite.com' || emailLower === 'admin@rescuebite.kh') {
-          const newAdmin = {
-            id: `usr_admin_${Date.now()}`,
-            email: emailLower,
-            name: 'Platform Administrator',
-            role: 'ADMIN',
-            phone: '+855 23 888 999',
-            avatar_url: null,
-            language: 'en',
-            points: 9999,
-            referral_code: 'ADMINVIP',
-            saved_store_ids: JSON.stringify([]),
-            created_at: new Date().toISOString(),
-          };
-          await pool.query(
-            `INSERT INTO users (id, email, name, role, phone, avatar_url, language, points, referral_code, saved_store_ids, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-            [
-              newAdmin.id,
-              newAdmin.email,
-              newAdmin.name,
-              newAdmin.role,
-              newAdmin.phone,
-              newAdmin.avatar_url,
-              newAdmin.language,
-              newAdmin.points,
-              newAdmin.referral_code,
-              newAdmin.saved_store_ids,
-              newAdmin.created_at,
-            ]
-          );
-          user = newAdmin;
-        } else {
-          return res.status(404).json({
-            error: 'No account found with this email. Please click "Sign Up" or "Join as Customer" to register.',
-          });
-        }
-      } else if (role && user.role !== role) {
-        await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, user.id]);
-        user.role = role;
+    if (!user) {
+      const emailLower = email.trim().toLowerCase();
+      // Auto-provision admin credentials if needed for platform administration
+      if (emailLower === 'admin@rescuebite.com' || emailLower === 'admin@rescuebite.kh') {
+        const newAdmin = {
+          id: `usr_admin_${Date.now()}`,
+          email: emailLower,
+          name: 'Platform Administrator',
+          role: 'ADMIN',
+          phone: '+855 23 888 999',
+          avatar_url: null,
+          language: 'en',
+          points: 9999,
+          referral_code: 'ADMINVIP',
+          saved_store_ids: JSON.stringify([]),
+          created_at: new Date().toISOString(),
+        };
+        await pool.query(
+          `INSERT INTO users (id, email, name, role, phone, avatar_url, language, points, referral_code, saved_store_ids, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            newAdmin.id,
+            newAdmin.email,
+            newAdmin.name,
+            newAdmin.role,
+            newAdmin.phone,
+            newAdmin.avatar_url,
+            newAdmin.language,
+            newAdmin.points,
+            newAdmin.referral_code,
+            newAdmin.saved_store_ids,
+            newAdmin.created_at,
+          ]
+        );
+        user = newAdmin;
+      } else {
+        return res.status(404).json({
+          error: 'No account found with this email. Please click "Sign Up" or "Join as Customer" to register.',
+        });
       }
     }
 
