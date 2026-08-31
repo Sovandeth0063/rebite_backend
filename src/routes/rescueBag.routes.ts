@@ -164,7 +164,21 @@ rescueBagRouter.post('/', async (req: AuthenticatedRequest, res) => {
 
     const originalPrice = parseFloat(data.originalPrice) || 10.0;
     const rescuePrice = parseFloat(data.rescuePrice) || 3.5;
+
+    if (originalPrice <= 0 || rescuePrice <= 0) {
+      return res.status(400).json({ error: 'Prices must be greater than $0' });
+    }
+    if (rescuePrice >= originalPrice) {
+      return res.status(400).json({ error: 'Rescue price must be less than normal retail price' });
+    }
+
     const discount = Math.round(((originalPrice - rescuePrice) / originalPrice) * 100);
+    if (discount < 40) {
+      const maxAllowed = (originalPrice * 0.6).toFixed(2);
+      return res.status(400).json({
+        error: `Platform Rule: Rescue bags must offer at least 40% discount. Max allowed rescue price is $${maxAllowed} (currently ${discount}% discount).`,
+      });
+    }
 
     await pool.query(
       `INSERT INTO rescue_bags (id, merchant_id, merchant_name, merchant_logo, merchant_rating, merchant_address, merchant_lat, merchant_lng, title, title_en, title_km, description, description_en, description_km, category, image_url, original_price, rescue_price, discount_percentage, quantity_remaining, total_quantity, pickup_start, pickup_end, allergens, ingredients, storage_instructions, min_items, max_items, visibility, safety_confirmed, created_at)
@@ -215,24 +229,48 @@ rescueBagRouter.post('/', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// Update rescue bag (PUT & PATCH)
 const handleUpdateRescueBag = async (req: any, res: any) => {
   const data = req.body;
   try {
+    const existing = await queryOne('SELECT * FROM rescue_bags WHERE id = $1', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Rescue bag not found' });
+    }
+
+    const origPrice = data.originalPrice !== undefined ? parseFloat(data.originalPrice) : parseFloat(existing.original_price);
+    const rescPrice = data.rescuePrice !== undefined ? parseFloat(data.rescuePrice) : parseFloat(existing.rescue_price);
+
+    if (data.rescuePrice !== undefined || data.originalPrice !== undefined) {
+      if (rescPrice >= origPrice) {
+        return res.status(400).json({ error: 'Rescue price must be lower than original retail price' });
+      }
+      const discount = Math.round(((origPrice - rescPrice) / origPrice) * 100);
+      if (discount < 40) {
+        const maxAllowed = (origPrice * 0.6).toFixed(2);
+        return res.status(400).json({
+          error: `Platform Rule: Must be at least 40% discount. Max allowed rescue price is $${maxAllowed} (provided: $${rescPrice.toFixed(2)} = ${discount}% off).`,
+        });
+      }
+    }
+
+    const discountPct = Math.round(((origPrice - rescPrice) / origPrice) * 100);
+
     await pool.query(
       `UPDATE rescue_bags
        SET title = COALESCE($1, title),
            description = COALESCE($2, description),
            rescue_price = COALESCE($3, rescue_price),
            original_price = COALESCE($4, original_price),
-           quantity_remaining = COALESCE($5, quantity_remaining),
-           visibility = COALESCE($6, visibility)
-       WHERE id = $7`,
+           discount_percentage = COALESCE($5, discount_percentage),
+           quantity_remaining = COALESCE($6, quantity_remaining),
+           visibility = COALESCE($7, visibility)
+       WHERE id = $8`,
       [
         data.title,
         data.description,
         data.rescuePrice,
         data.originalPrice,
+        discountPct,
         data.quantityRemaining,
         data.visibility,
         req.params.id,
