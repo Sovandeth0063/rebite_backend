@@ -33,19 +33,6 @@ export const GUEST_USER: User = {
 
 export const DEMO_USERS: User[] = [
   {
-    id: 'usr_customer',
-    email: 'customer@rescuebite.kh',
-    name: 'Dara Sok',
-    role: 'CUSTOMER',
-    phone: '+855 12 345 678',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    language: 'en',
-    points: 120,
-    referralCode: 'SAVEWITHDARA',
-    savedStoreIds: ['mer_kayser', 'mer_brown', 'mer_labrioche'],
-    createdAt: '2026-01-15T08:00:00Z',
-  },
-  {
     id: 'usr_merchant',
     email: 'merchant@rescuebite.kh',
     name: 'Sophy Chhen (Maison Kayser Manager)',
