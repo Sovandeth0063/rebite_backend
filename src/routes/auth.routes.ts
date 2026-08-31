@@ -23,7 +23,7 @@ export const authRouter = Router();
 // Login
 authRouter.post('/login', async (req, res) => {
   const { email, password, role } = req.body;
-  if (!email) {
+  if (!email || !email.trim()) {
     return res.status(400).json({ error: 'Email address is required' });
   }
 
@@ -31,39 +31,45 @@ authRouter.post('/login', async (req, res) => {
     let user = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
 
     if (!user) {
-      const isAdminEmail = email.trim().toLowerCase().startsWith('admin@');
-      const newUser = {
-        id: `usr_${Date.now()}`,
-        email: email.trim(),
-        name: email.split('@')[0],
-        role: role || (isAdminEmail ? 'ADMIN' : 'CUSTOMER'),
-        phone: '+855 12 000 000',
-        avatar_url: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-        language: 'en',
-        points: 50,
-        referral_code: 'RESCUE' + Math.floor(1000 + Math.random() * 9000),
-        saved_store_ids: JSON.stringify([]),
-        created_at: new Date().toISOString(),
-      };
-
-      await pool.query(
-        `INSERT INTO users (id, email, name, role, phone, avatar_url, language, points, referral_code, saved_store_ids, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          newUser.id,
-          newUser.email,
-          newUser.name,
-          newUser.role,
-          newUser.phone,
-          newUser.avatar_url,
-          newUser.language,
-          newUser.points,
-          newUser.referral_code,
-          newUser.saved_store_ids,
-          newUser.created_at,
-        ]
-      );
-      user = newUser;
+      const emailLower = email.trim().toLowerCase();
+      // Auto-provision admin credentials if needed for platform administration
+      if (emailLower === 'admin@rescuebite.com' || emailLower === 'admin@rescuebite.kh') {
+        const newAdmin = {
+          id: `usr_admin_${Date.now()}`,
+          email: emailLower,
+          name: 'Platform Administrator',
+          role: 'ADMIN',
+          phone: '+855 23 888 999',
+          avatar_url: null,
+          language: 'en',
+          points: 9999,
+          referral_code: 'ADMINVIP',
+          saved_store_ids: JSON.stringify([]),
+          created_at: new Date().toISOString(),
+        };
+        await pool.query(
+          `INSERT INTO users (id, email, name, role, phone, avatar_url, language, points, referral_code, saved_store_ids, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [
+            newAdmin.id,
+            newAdmin.email,
+            newAdmin.name,
+            newAdmin.role,
+            newAdmin.phone,
+            newAdmin.avatar_url,
+            newAdmin.language,
+            newAdmin.points,
+            newAdmin.referral_code,
+            newAdmin.saved_store_ids,
+            newAdmin.created_at,
+          ]
+        );
+        user = newAdmin;
+      } else {
+        return res.status(404).json({
+          error: 'No account found with this email. Please click "Sign Up" or "Join as Customer" to register.',
+        });
+      }
     } else if (role && user.role !== role) {
       await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, user.id]);
       user.role = role;
@@ -92,10 +98,10 @@ authRouter.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        phone: user.phone,
-        avatarUrl: user.avatar_url,
-        language: user.language,
-        points: user.points,
+        phone: user.phone || '',
+        avatarUrl: user.avatar_url || '',
+        language: user.language || 'en',
+        points: user.points || 0,
         referralCode: user.referral_code,
         referredBy: user.referred_by,
         savedStoreIds: user.saved_store_ids || [],
@@ -110,18 +116,18 @@ authRouter.post('/login', async (req, res) => {
 
 // Register
 authRouter.post('/register', async (req, res) => {
-  const { email, password, name, role, phone, referralCode } = req.body;
+  const { email, password, name, role, phone, businessName, referralCode } = req.body;
   if (!email || !name) {
-    return res.status(400).json({ error: 'Email and Name are required' });
+    return res.status(400).json({ error: 'Email and Full Name are required' });
   }
 
   try {
     const existing = await queryOne('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
     if (existing) {
-      return res.status(400).json({ error: 'An account with this email already exists' });
+      return res.status(400).json({ error: 'An account with this email already exists. Please log in.' });
     }
 
-    let initialPoints = 50;
+    let initialPoints = role === 'CUSTOMER' ? 50 : 0;
     let referredBy: string | undefined;
 
     if (referralCode) {
@@ -135,11 +141,11 @@ authRouter.post('/register', async (req, res) => {
 
     const newUser = {
       id: `usr_${Date.now()}`,
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       name: name.trim(),
       role: role || 'CUSTOMER',
-      phone: phone || '+855 12 000 000',
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      phone: phone ? phone.trim() : null,
+      avatar_url: null,
       language: 'en',
       points: initialPoints,
       referral_code: 'RESCUE' + Math.floor(1000 + Math.random() * 9000),
@@ -167,6 +173,40 @@ authRouter.post('/register', async (req, res) => {
       ]
     );
 
+    // If registering as a merchant, also create a linked merchant store record
+    if (role === 'MERCHANT' && businessName) {
+      const merchantId = `mer_${Date.now()}`;
+      await pool.query(
+        `INSERT INTO merchants (id, user_id, business_name, business_type, owner_name, phone, email, address, district, city, latitude, longitude, logo_url, cover_url, description, rating, review_count, opening_hours, pickup_window_default, status, joined_date, food_categories)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          merchantId,
+          newUser.id,
+          businessName.trim(),
+          'Bakery',
+          name.trim(),
+          phone ? phone.trim() : '+855 12 000 000',
+          email.trim().toLowerCase(),
+          'Phnom Penh, Cambodia',
+          'Boeung Keng Kang',
+          'Phnom Penh',
+          11.5564,
+          104.9282,
+          'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200',
+          'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800',
+          `Welcome to ${businessName.trim()} on RescueBite. Fresh daily surplus items available for pickup.`,
+          5.0,
+          0,
+          '08:00 AM - 08:00 PM',
+          '18:00 - 19:30',
+          'APPROVED',
+          new Date().toISOString().split('T')[0],
+          JSON.stringify(['Bakery', 'Café']),
+        ]
+      );
+    }
+
     res.json({
       token: `jwt_demo_${newUser.id}`,
       user: {
@@ -174,8 +214,8 @@ authRouter.post('/register', async (req, res) => {
         email: newUser.email,
         name: newUser.name,
         role: newUser.role,
-        phone: newUser.phone,
-        avatarUrl: newUser.avatar_url,
+        phone: newUser.phone || '',
+        avatarUrl: '',
         language: newUser.language,
         points: newUser.points,
         referralCode: newUser.referral_code,
