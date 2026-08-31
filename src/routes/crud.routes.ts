@@ -102,11 +102,15 @@ crudRouter.get('/tables', async (req, res) => {
 });
 
 // 2. Read rows with pagination, search, and sorting
-crudRouter.get('/tables/:tableName', async (req, res) => {
+crudRouter.get(['/tables/:tableName', '/:tableName'], async (req, res) => {
   try {
+    if (req.params.tableName === 'tables') return; // Handled by /tables route
     const tableName = sanitizeTableName(req.params.tableName);
     const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 500);
-    const offset = Math.max(parseInt((req.query.offset as string) || '0', 10), 0);
+    const page = Math.max(parseInt((req.query.page as string) || '1', 10), 1);
+    const offset = req.query.offset !== undefined
+      ? Math.max(parseInt((req.query.offset as string) || '0', 10), 0)
+      : (page - 1) * limit;
     const search = (req.query.search as string) || '';
     const orderBy = (req.query.orderBy as string) || '';
     const orderDir = ((req.query.orderDir as string) || 'ASC').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
@@ -165,10 +169,19 @@ crudRouter.get('/tables/:tableName', async (req, res) => {
       tableName,
       primaryKey,
       totalRows,
+      total: totalRows,
+      page,
       limit,
       offset,
       columns: colRows,
       rows,
+      data: rows,
+      pagination: {
+        total: totalRows,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(totalRows / limit)),
+      },
     });
   } catch (err: any) {
     console.error('CRUD read error:', err);
@@ -177,7 +190,7 @@ crudRouter.get('/tables/:tableName', async (req, res) => {
 });
 
 // 3. Create (Insert) a new row
-crudRouter.post('/tables/:tableName', async (req: AuthenticatedRequest, res) => {
+crudRouter.post(['/tables/:tableName', '/:tableName'], async (req: AuthenticatedRequest, res) => {
   try {
     const tableName = sanitizeTableName(req.params.tableName);
     const data = req.body;
@@ -239,7 +252,7 @@ crudRouter.post('/tables/:tableName', async (req: AuthenticatedRequest, res) => 
 });
 
 // 4. Update an existing row by ID
-crudRouter.put('/tables/:tableName/:id', async (req: AuthenticatedRequest, res) => {
+crudRouter.put(['/tables/:tableName/:id', '/:tableName/:id'], async (req: AuthenticatedRequest, res) => {
   try {
     const tableName = sanitizeTableName(req.params.tableName);
     const rowId = req.params.id;
@@ -315,7 +328,7 @@ crudRouter.put('/tables/:tableName/:id', async (req: AuthenticatedRequest, res) 
 });
 
 // 5. Delete a row by ID
-crudRouter.delete('/tables/:tableName/:id', async (req: AuthenticatedRequest, res) => {
+crudRouter.delete(['/tables/:tableName/:id', '/:tableName/:id'], async (req: AuthenticatedRequest, res) => {
   try {
     const tableName = sanitizeTableName(req.params.tableName);
     const rowId = req.params.id;
@@ -355,8 +368,8 @@ crudRouter.delete('/tables/:tableName/:id', async (req: AuthenticatedRequest, re
 });
 
 // 6. Execute direct SQL query console
-crudRouter.post('/query', async (req: AuthenticatedRequest, res) => {
-  const { sql } = req.body;
+crudRouter.post(['/query', '/query/sql'], async (req: AuthenticatedRequest, res) => {
+  const sql = req.body.sql || req.body.query;
   if (!sql || typeof sql !== 'string') {
     return res.status(400).json({ error: 'SQL query string is required' });
   }
