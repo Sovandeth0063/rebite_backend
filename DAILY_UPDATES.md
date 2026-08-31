@@ -8,7 +8,18 @@
 
 ## 🚀 Summary of Key Accomplishments Today
 
-### 1. 🧮 100% Pure Deterministic Mathematical Forecasting Engine
+### 1. 🛡️ Platform Rule: Mandatory 40%+ Discount for All Surprise Bags
+- **Merchant Freedom with Platform Safeguard:** Merchants have full autonomy to set their own retail price, rescue price, and pickup periods, but the platform enforces a **minimum 40% discount rule** ($\ge 40\%$ OFF).
+- **Live Discount Indicator Pill:** As the merchant types prices in the creation/edit modal, a live pill calculates the discount:
+  - `⚡ 50% OFF — Eligible for Rescue Listing` (Green)
+  - `⚠️ 30% OFF — Platform rule requires at least 40% OFF (Max allowed price: $X.XX)` (Amber/Red)
+- **Backend & Frontend Validation:**
+  - `validateBagForm()` blocks publishing if discount $< 40\%$.
+  - `POST /api/bags` and `PUT /api/bags/:id` reject listings under 40% discount with HTTP 400.
+
+---
+
+### 2. 🧮 100% Pure Deterministic Mathematical Forecasting Engine
 - **$0.00 Operational Cost & Instant Speed (< 0.2ms):** Fully replaced external LLM / Google Gemini calls for surplus forecasting with local deterministic statistical algorithms.
 - **Clamped Dynamic Markdown Pricing:**
   $$\text{Discount } \% = \max\left(30\%, \min\left(70\%, \text{round}(0.40 + (U \times 0.20) + (C_{\text{decay}} \times 0.10))\right)\right)$$
@@ -21,7 +32,7 @@
 
 ---
 
-### 2. 💼 Lean Canvas Business Alignment (AIM Growth Model)
+### 3. 💼 Lean Canvas Business Alignment (AIM Growth Model)
 - **15% Performance-Based Platform Commission:** Merchants pay zero upfront or fixed fees. Commission is calculated solely upon successful bag collection.
 - **Merchant Revenue Recovery & Commission Breakdown:** Integrated into Merchant BI tab displaying Gross Recovered Revenue ($ & KHR), Platform Commission, and Net Payout to ABA / Bakong.
 - **1-Click Telegram Drop Alert Tool:** Added a one-click copy tool formatted for Telegram channels & groups with bilingual Khmer/English copy to drive immediate local store traffic.
@@ -29,13 +40,13 @@
 
 ---
 
-### 3. 🗄️ Admin Studio Overview Entity Navigation (Port 3002)
+### 4. 🗄️ Admin Studio Overview Entity Navigation (Port 3002)
 - **Fixed Table Entity Routing:** Resolved an issue where clicking `users`, `orders`, or other tables in the Overview dashboard always defaulted to `merchants`.
 - **Direct Navigation:** Clicking any database table card in Dashboard Overview now directly navigates to and selects that exact schema in the Database Studio (CRUD) interface.
 
 ---
 
-### 4. 🥐 8 Real Phnom Penh Bakeries & Surplus Bags Seed Data
+### 5. 🥐 8 Real Phnom Penh Bakeries & Surplus Bags Seed Data
 - Populated 8 real bakeries, cafés, and supermarkets across Phnom Penh offering daily end-of-day discounts (50%–70% off):
   1. **La Brioche Bakery (Hotel Cambodiana)** — Sisowath Quay, Daun Penh *(French luxury pastries, fruit tarts, eclairs)*
   2. **Maison Kayser Cambodia (BKK1)** — St 282, Boeung Keng Kang 1 *(Artisan sourdough, butter croissants, baguette sandwiches)*
@@ -46,12 +57,6 @@
   7. **Lucky Supermarket Bakery (Sihanouk Mall)** — Preah Sihanouk Blvd *(Evening markdown bread loaves, dinner rolls, donuts)*
   8. **Artisan Boulangerie & Café (Toul Tom Poung)** — St 450, Russian Market *(Olive focaccia, cinnamon rolls, vegan loaves)*
 - Fully seeded into PostgreSQL with real GPS coordinates, pickup windows, original/discount prices, and bilingual English/Khmer descriptions.
-
----
-
-### 5. 🛡️ Database & PostgreSQL UTF-8 Cluster
-- Initialized standalone PostgreSQL cluster with `UTF-8` client encoding and `locale=C` to flawlessly store Khmer script (`ភាសាខ្មែរ`) alongside English text.
-- Configured relational tables: `users`, `merchants`, `rescue_bags`, `orders`, `order_items`, `reviews`, `impact_stats`, `reports`, `inventory`, `ai_recommendations`, `notifications`, `customer_settings`, `merchant_settings`, `platform_config`, and `admin_users`.
 
 ---
 
@@ -105,30 +110,3 @@ Open `http://localhost:3002` in your browser.
 | **Admin** | `admin@rescuebite.kh` | `password123` | Full access to Database Studio & CRUD |
 | **Merchant** | `merchant@rescuebite.kh` | `password123` | Store owner for *Artisan Boulangerie & Café* |
 | **Customer** | Register new account or use any verified email | `password123` | Starts with 0 pts and clean history |
-
----
-
-## 📊 Summary of Modified Files
-
-### Backend (`rebite_backend`)
-- `src/services/forecastingEngine.ts` **[NEW]** — 100% deterministic mathematical forecasting & dynamic pricing engine.
-- `src/tests/test_forecast_engine.ts` **[NEW]** — 15-scenario automated verification test suite.
-- `src/controllers/ai.controller.ts` **[MODIFY]** — Express controller wired to pure math engine.
-- `src/routes/ai.routes.ts` **[MODIFY]** — Route definitions delegating to controller.
-- `src/services/gemini.ts` **[MODIFY]** — Lightweight interface delegating to math engine.
-- `src/services/translation.ts` **[MODIFY]** — Dedicated bilingual translation handler.
-- `src/routes/merchant.routes.ts` **[MODIFY]** — Analytics calculation (15% commission, net payout in USD/KHR).
-- `src/routes/auth.routes.ts` **[MODIFY]** — Removed demo role switcher bypass; strict authentic auth.
-- `src/db/createDb.ts` **[MODIFY]** — Database provisioning with 8 Phnom Penh bakeries.
-
-### Admin Studio (`backend/admin`)
-- `src/App.tsx` **[MODIFY]** — Added `selectedTable` state synchronization across views.
-- `src/components/DashboardOverview.tsx` **[MODIFY]** — Wired table entity cards to pass schema names directly.
-- `src/components/DatabaseStudioView.tsx` **[MODIFY]** — Accepted `initialTable` and synced active schema on navigation.
-
-### Frontend App (`ReBite`)
-- `src/components/MerchantView.tsx` **[MODIFY]** — AI Surplus Forecaster tab, Revenue Recovery breakdown card, Telegram 1-click share.
-- `src/components/CustomerView.tsx` **[MODIFY]** — Added Evening Rush and Under $3.50 filter chips.
-- `src/components/Header.tsx` **[MODIFY]** — Removed demo role switcher.
-- `src/components/DemoRoleSwitcher.tsx` **[DELETE]** — Removed unused demo component.
-- `src/services/api.ts` & `src/types/index.ts` **[MODIFY]** — Added `forecastSurplus` and `getMerchantAnalytics` API calls and types.
