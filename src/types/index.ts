@@ -36,7 +36,8 @@ export type BusinessCategory =
   | 'Dessert'
   | 'Fast Food'
   | 'Vegetarian'
-  | 'Other';
+  | 'Other'
+  | string;
 
 export type MerchantStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
 
@@ -103,13 +104,17 @@ export interface RescueBag {
   totalQuantity: number;
   pickupStart: string;
   pickupEnd: string;
-  allergens: string[];
+  tags?: string[];
+  allergens?: string[];
+  dietary?: string[];
+  co2SavedKg?: number;
+  status?: string;
   ingredients?: string[];
   storageInstructions?: string;
-  minItems: number;
-  maxItems: number;
-  visibility: ListingVisibility;
-  safetyConfirmed: boolean;
+  minItems?: number;
+  maxItems?: number;
+  visibility?: ListingVisibility;
+  safetyConfirmed?: boolean;
   hasAutoEscalatingDiscount?: boolean;
   escalatedDiscountPercentage?: number;
   escalateMinutesBeforeEnd?: number;
@@ -184,21 +189,29 @@ export interface ImpactStats {
 export interface AchievementBadge {
   id: string;
   title: string;
-  titleKm: string;
+  titleKm?: string;
   description: string;
+  descriptionKm?: string;
   icon: string;
-  unlocked: boolean;
+  unlocked?: boolean;
   unlockedAt?: string;
-  progress: number;
+  progress?: number;
+  category?: string;
 }
 
 export interface RewardItem {
   id: string;
   title: string;
+  titleKm?: string;
   pointsCost: number;
-  discountUsd: number;
+  discountUsd?: number;
+  discountAmountUsd?: number;
   description: string;
-  code: string;
+  descriptionKm?: string;
+  code?: string;
+  category?: string;
+  expiresInDays?: number;
+  partnerName?: string;
 }
 
 export interface NotificationItem {

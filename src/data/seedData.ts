@@ -667,3 +667,8 @@ export const DEMO_REWARDS: RewardItem[] = [
     partnerName: 'Wildlife Alliance Cambodia',
   },
 ];
+
+export const ACHIEVEMENTS = DEMO_ACHIEVEMENTS;
+export const REWARDS = DEMO_REWARDS;
+export const MERCHANTS = DEMO_MERCHANTS;
+export const RESCUE_BAGS = DEMO_RESCUE_BAGS;
