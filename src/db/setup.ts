@@ -22,12 +22,20 @@ const __dirname = path.dirname(__filename);
 export async function setupDatabase(forceRecreate: boolean = false) {
   console.log('[PostgreSQL] Initializing PostgreSQL database schema...');
 
-  const schemaPath = path.join(__dirname, 'schema.sql');
+  let schemaPath = path.join(__dirname, 'schema.sql');
+  if (!fs.existsSync(schemaPath)) {
+    schemaPath = path.join(process.cwd(), 'src', 'db', 'schema.sql');
+  }
+  if (!fs.existsSync(schemaPath)) {
+    schemaPath = path.resolve('src/db/schema.sql');
+  }
   const schemaSql = fs.readFileSync(schemaPath, 'utf8');
 
   if (forceRecreate) {
     console.log('[PostgreSQL] Dropping existing tables for fresh migration...');
     await pool.query(`
+      DROP TABLE IF EXISTS live_listings CASCADE;
+      DROP TABLE IF EXISTS menu_items CASCADE;
       DROP TABLE IF EXISTS login_sessions CASCADE;
       DROP TABLE IF EXISTS admin_users CASCADE;
       DROP TABLE IF EXISTS platform_config CASCADE;
@@ -238,6 +246,25 @@ export async function setupDatabase(forceRecreate: boolean = false) {
         }),
       ]
     );
+
+    // 9. Seed Menu Items for Live Menu Fast Listing
+    const SAMPLE_MENU_ITEMS = [
+      { id: 'menu_item_1', merchantId: 'mer_labrioche', name: 'Artisan Butter Croissant', nameKm: 'នំប៉័ងក្រូសង់ប៊ឺរ', category: 'Bakery', basePrice: 2.50, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
+      { id: 'menu_item_2', merchantId: 'mer_labrioche', name: 'Pain au Chocolat', nameKm: 'នំប៉័ងសូកូឡាបារាំង', category: 'Bakery', basePrice: 2.80, imageUrl: 'https://images.unsplash.com/photo-1530610476181-d83430b64dcd?w=400' },
+      { id: 'menu_item_3', merchantId: 'mer_labrioche', name: 'French Baguette Tradition', nameKm: 'នំប៉័ងបាហ្គែតបារាំង', category: 'Bakery', basePrice: 1.80, imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=400' },
+      { id: 'menu_item_4', merchantId: 'mer_kayser', name: 'Organic Sourdough Loaf', nameKm: 'នំប៉័ងសូឌ័រធម្មជាតិ', category: 'Bakery', basePrice: 4.50, imageUrl: 'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=400' },
+      { id: 'menu_item_5', merchantId: 'mer_brown', name: 'Iced Brown Latte & Cheese Muffin', nameKm: 'កាហ្វេឡាតេទឹកកក និងម៉ាហ្វិនឈីស', category: 'Café', basePrice: 3.80, imageUrl: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=400' },
+      { id: 'menu_item_6', merchantId: 'mer_breadtalk', name: 'Signature Pork Flosss Bun', nameKm: 'នំប៉័ងសាច់ផាត់', category: 'Bakery', basePrice: 2.20, imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400' },
+    ];
+
+    for (const item of SAMPLE_MENU_ITEMS) {
+      await pool.query(
+        `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO NOTHING`,
+        [item.id, item.merchantId, item.name, item.nameKm, item.category, item.basePrice, item.imageUrl]
+      );
+    }
 
     console.log('[PostgreSQL] Initial seed completed successfully.');
   } else {

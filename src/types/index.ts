@@ -361,3 +361,43 @@ export interface ReportItem {
   status: 'PENDING' | 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED';
   createdAt: string;
 }
+
+export interface MenuItem {
+  id: string;
+  merchantId: string;
+  name: string;
+  nameKm?: string;
+  category: BusinessCategory;
+  basePrice: number;
+  imageUrl?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type LiveListingStatus = 'LIVE' | 'SOLD_OUT' | 'EXPIRED';
+
+export interface LiveListing {
+  id: string;
+  merchantId: string;
+  menuItemId: string;
+  merchantName: string;
+  merchantLogo: string;
+  merchantLat: number;
+  merchantLng: number;
+  merchantAddress: string;
+  itemName: string;
+  itemNameKm?: string;
+  imageUrl?: string;
+  quantityLeft: number;
+  discountPct: number;
+  rescuePrice: number;
+  originalPrice: number;
+  expiresAt: string;
+  pickupStart?: string;
+  pickupEnd?: string;
+  status: LiveListingStatus;
+  createdAt: string;
+  updatedAt?: string;
+}
+

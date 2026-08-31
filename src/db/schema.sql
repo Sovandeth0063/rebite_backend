@@ -280,6 +280,45 @@ CREATE TABLE IF NOT EXISTS login_sessions (
   is_current BOOLEAN DEFAULT FALSE
 );
 
+-- 16. Menu Items Table (Merchant's reusable item catalogue — set up once)
+CREATE TABLE IF NOT EXISTS menu_items (
+  id VARCHAR(100) PRIMARY KEY,
+  merchant_id VARCHAR(100) NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  name_km VARCHAR(255),
+  category VARCHAR(100) NOT NULL DEFAULT 'Bakery',
+  base_price NUMERIC(10, 2) NOT NULL CHECK (base_price > 0),
+  image_url TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 17. Live Listings Table (What's available RIGHT NOW at a discounted price)
+CREATE TABLE IF NOT EXISTS live_listings (
+  id VARCHAR(100) PRIMARY KEY,
+  merchant_id VARCHAR(100) NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
+  menu_item_id VARCHAR(100) NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+  merchant_name VARCHAR(255) NOT NULL,
+  merchant_logo TEXT NOT NULL,
+  merchant_lat DOUBLE PRECISION NOT NULL,
+  merchant_lng DOUBLE PRECISION NOT NULL,
+  merchant_address TEXT NOT NULL,
+  item_name VARCHAR(255) NOT NULL,
+  item_name_km VARCHAR(255),
+  image_url TEXT,
+  quantity_left INTEGER NOT NULL DEFAULT 1 CHECK (quantity_left >= 0),
+  discount_pct INTEGER NOT NULL CHECK (discount_pct >= 40 AND discount_pct <= 90),
+  rescue_price NUMERIC(10, 2) NOT NULL CHECK (rescue_price > 0),
+  original_price NUMERIC(10, 2) NOT NULL CHECK (original_price > 0),
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  pickup_start VARCHAR(50),
+  pickup_end VARCHAR(50),
+  status VARCHAR(50) DEFAULT 'LIVE' CHECK (status IN ('LIVE', 'SOLD_OUT', 'EXPIRED')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- Triggers for Automatic `updated_at` Timestamp Management
 -- ============================================================================
@@ -323,6 +362,16 @@ CREATE TRIGGER trg_platform_config_updated_at
   BEFORE UPDATE ON platform_config
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_menu_items_updated_at ON menu_items;
+CREATE TRIGGER trg_menu_items_updated_at
+  BEFORE UPDATE ON menu_items
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_live_listings_updated_at ON live_listings;
+CREATE TRIGGER trg_live_listings_updated_at
+  BEFORE UPDATE ON live_listings
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 -- ============================================================================
 -- Performance & Query Optimization Indexes
 -- ============================================================================
@@ -339,3 +388,11 @@ CREATE INDEX IF NOT EXISTS idx_inventory_merchant ON inventory(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_date ON audit_logs(admin_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_login_sessions_user ON login_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_menu_items_merchant ON menu_items(merchant_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_live_listings_merchant ON live_listings(merchant_id, status);
+CREATE INDEX IF NOT EXISTS idx_live_listings_status_expiry ON live_listings(status, expires_at);
+
+-- Partial unique index: Only one LIVE row allowed per menu_item_id
+CREATE UNIQUE INDEX IF NOT EXISTS idx_live_listings_one_live_per_item
+  ON live_listings(menu_item_id)
+  WHERE status = 'LIVE';

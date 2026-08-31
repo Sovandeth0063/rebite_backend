@@ -81,12 +81,17 @@ app.get('/api/users', async (req, res) => {
 import { crudRouter } from './routes/crud.routes.js';
 import { settingsRouter } from './routes/settings.routes.js';
 import { bakongRouter } from './routes/bakong.routes.js';
+import { menuItemRouter } from './routes/menuItem.routes.js';
+import { liveListingRouter } from './routes/liveListing.routes.js';
+import { startExpiryWorker } from './services/expiryWorker.js';
 import { AuthenticatedRequest } from './middleware/auth.js';
 
 // Mount modular route handlers
 app.use('/api/auth', authRouter);
 app.use('/api/merchants', merchantRouter);
 app.use('/api/rescue-bags', rescueBagRouter);
+app.use('/api/menu-items', menuItemRouter);
+app.use('/api/live-listings', liveListingRouter);
 app.use('/api/orders', orderRouter);
 app.use('/api/reviews', reviewRouter);
 app.use('/api/impact', impactRouter);
@@ -177,6 +182,9 @@ async function start() {
     console.log(`🚀 RescueBite Backend API is running on http://localhost:${PORT}`);
     console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
     console.log(`======================================================\n`);
+
+    // Start background auto-expiry daemon
+    startExpiryWorker();
   });
 }
 
