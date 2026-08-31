@@ -12,29 +12,96 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
 import { setupDatabase } from './setup.js';
+import { exec, spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
 const { Client } = pg;
 
+async function startLocalPostgresIfStopped(host: string, port: number) {
+  const pgDataPath = path.resolve('pgdata');
+  const pgExePath = 'C:\\Program Files\\PostgreSQL\\14\\bin\\postgres.exe';
+
+  if (!fs.existsSync(pgExePath) || !fs.existsSync(pgDataPath)) {
+    return;
+  }
+
+  // Remove stale pid file if postmaster process is dead
+  const pidFile = path.join(pgDataPath, 'postmaster.pid');
+  if (fs.existsSync(pidFile)) {
+    try {
+      const pidContent = fs.readFileSync(pidFile, 'utf8');
+      const pid = parseInt(pidContent.split('\n')[0], 10);
+      let isAlive = false;
+      try {
+        process.kill(pid, 0);
+        isAlive = true;
+      } catch {
+        isAlive = false;
+      }
+      if (!isAlive) {
+        fs.unlinkSync(pidFile);
+        console.log('[PostgreSQL] Removed stale postmaster.pid file.');
+      }
+    } catch {}
+  }
+
+  console.log(`[PostgreSQL] Attempting auto-start on local cluster (port ${port})...`);
+  try {
+    const child = spawn(pgExePath, ['-D', pgDataPath], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    // Wait for postgres to be ready
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  } catch (err: any) {
+    console.warn(`[PostgreSQL] Auto-start attempt error: ${err.message}`);
+  }
+}
+
 export async function ensureDatabaseAndSchema() {
   const host = process.env.PGHOST || 'localhost';
-  const port = parseInt(process.env.PGPORT || '3000', 10);
+  const port = parseInt(process.env.PGPORT || '5432', 10);
   const user = process.env.PGUSER || 'postgres';
   const password = process.env.PGPASSWORD || 'postgres';
   const targetDb = process.env.PGDATABASE || 'rescuebite';
 
   // 1. Connect to root 'postgres' db to ensure target database exists
-  const rootClient = new Client({
+  let rootClient = new Client({
     host,
     port,
     user,
     password,
     database: 'postgres',
+    connectionTimeoutMillis: 3000,
   });
 
   try {
     await rootClient.connect();
+  } catch (connectErr: any) {
+    if (connectErr.code === 'ECONNREFUSED' || connectErr.message?.includes('ECONNREFUSED')) {
+      await startLocalPostgresIfStopped(host, port);
+      rootClient = new Client({
+        host,
+        port,
+        user,
+        password,
+        database: 'postgres',
+        connectionTimeoutMillis: 4000,
+      });
+      try {
+        await rootClient.connect();
+      } catch (retryErr: any) {
+        console.warn(`[PostgreSQL] Could not connect to root db after auto-start: ${retryErr.message}`);
+      }
+    }
+  }
+
+  try {
     const checkDb = await rootClient.query('SELECT 1, pg_encoding_to_char(encoding) as enc FROM pg_database WHERE datname = $1', [targetDb]);
     if (checkDb.rows.length === 0) {
       console.log(`[PostgreSQL] Database "${targetDb}" not found. Creating database with UTF-8 encoding...`);
