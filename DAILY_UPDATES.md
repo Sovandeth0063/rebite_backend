@@ -1,5 +1,73 @@
 # 📋 RescueBite / ReBite — Daily System Update Report
-**Date:** September 1, 2026  
+**Date:** September 2, 2026  
+**Repositories:**
+- **Frontend App:** [chhounpisethchesda/ReBite](https://github.com/chhounpisethchesda/ReBite) (`sovandeth` branch)
+- **Backend & Admin Panel:** [Sovandeth0063/rebite_backend](https://github.com/Sovandeth0063/rebite_backend) (`main` branch)
+
+---
+
+## 🚀 Summary of Key Accomplishments Today
+
+### 1. 🐛 Critical Database Wipe Bug Fixed (`setup.ts`)
+- **Root Cause:** `setup.ts` line 342 had `|| true` hardcoded at the end of the `isFresh` flag:
+  ```ts
+  // ❌ Before — wiped DB on every backend restart!
+  const isFresh = process.argv.includes('--fresh') || process.argv.includes('--reset') || true;
+  // ✅ After — only wipes when explicitly requested
+  const isFresh = process.argv.includes('--fresh') || process.argv.includes('--reset');
+  ```
+- **Impact:** Every time `npm run dev` restarted or hot-reloaded the backend, all orders, sessions, and user data were silently dropped and re-seeded. This was the true cause of the "My Orders shows empty" bug.
+- **Fix:** Removed `|| true`. The database now persists all orders across restarts.
+
+---
+
+### 2. 🛒 Complete Cash Order Flow Fixed End-to-End
+- **"Done & View Orders" Now Works:** After confirming a Cash at Store reservation, clicking "Done & View Orders" correctly navigates to `My Orders` and shows `Active Reservations (1)` with the QR code and pickup window.
+- **Triple-layer persistence strategy:**
+  1. `CheckoutView.tsx` passes `completedOrder` directly into `onClose(completedOrder)` on the Done button.
+  2. `App.tsx` immediately injects the order into React state AND commits it to `localStorage`.
+  3. `OrdersView.tsx` uses a `useMemo` fallback to read from `localStorage` if the `orders` prop is ever momentarily empty.
+
+---
+
+### 3. ❌ Order Cancellation — Fully Working
+- **Cancel endpoint** in `order.routes.ts` now resolves orders by both `id` and `order_number` (`WHERE id = $1 OR order_number = $1`).
+- Points deduction on cancellation: `UPDATE users SET points = GREATEST(0, points - quantity * 10)`.
+- Bag inventory restored: `UPDATE rescue_bags SET quantity_remaining = quantity_remaining + quantity`.
+- `App.tsx handleCancelOrder` immediately flips the local order state to `CANCELLED` and persists to `localStorage`, so the cancelled order disappears from Active Reservations and appears in Past Order History instantly.
+
+---
+
+### 4. 🔁 React Re-render Loop Fixed (`OrdersView.tsx` + `App.tsx`)
+- **Root Cause:** `OrdersView` had `useEffect(() => { onRefreshOrders?.(); }, [onRefreshOrders])`. Since `onRefreshOrders` was a new function reference on every render, this triggered an infinite fetch loop.
+- **Fix:**
+  - Changed `useEffect` dependency to `[]` (runs once on mount only).
+  - Wrapped `loadAllData` in `App.tsx` with `useCallback(..., [])` to guarantee a stable reference.
+
+---
+
+### 5. 🏷️ TypeScript `OrderStatus` Type Expanded (`types/index.ts`)
+- Added `PENDING`, `PAID`, `CONFIRMED`, `EXPIRED` to the `OrderStatus` union type.
+- These are used in `OrdersView.tsx` filters for both active and past order states.
+- Resolves 4 TypeScript TS2367 "no overlap" compile errors that appeared in `OrdersView.tsx`.
+
+---
+
+## 🛠️ Files Changed
+
+| File | Change |
+|---|---|
+| `backend/src/db/setup.ts` | Removed `|| true` from `isFresh` flag — critical DB persistence fix |
+| `backend/src/routes/order.routes.ts` | Cancel endpoint: dual ID/order_number lookup; points deduction; bag restock; COMMIT fix |
+| `backend/src/server.ts` | Added `/api/debug-db` diagnostic route |
+| `ReBite/src/App.tsx` | `handleCancelOrder` local state update; `loadAllData` wrapped in `useCallback`; checkout `onClose` hands off `completedOrder`; `orders` initialized from `localStorage` |
+| `ReBite/src/components/CheckoutView.tsx` | "Done & View Orders" passes `completedOrder` to `onClose`; removed VIP/Standard badge; added `Pay at Counter` label |
+| `ReBite/src/components/OrdersView.tsx` | Removed stale `useMemo` with `[]` dependency; added `effectiveOrders` fallback from `localStorage`; fixed `useEffect` dependency to `[]` |
+| `ReBite/src/types/index.ts` | Expanded `OrderStatus` to include `PENDING`, `PAID`, `CONFIRMED`, `EXPIRED` |
+
+---
+
+
 **Repositories:**
 - **Frontend App:** [chhounpisethchesda/ReBite](https://github.com/chhounpisethchesda/ReBite) (`sovandeth` branch)
 - **Backend & Admin Panel:** [Sovandeth0063/rebite_backend](https://github.com/Sovandeth0063/rebite_backend) (`main` branch)
