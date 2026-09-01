@@ -339,7 +339,7 @@ export async function setupDatabase(forceRecreate: boolean = false) {
 
 // Auto-run if executed directly via `npm run db:setup`
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const isFresh = process.argv.includes('--fresh') || process.argv.includes('--reset') || true;
+  const isFresh = process.argv.includes('--fresh') || process.argv.includes('--reset');
   setupDatabase(isFresh)
     .then(async () => {
       console.log('[PostgreSQL] Setup and migrations complete!');

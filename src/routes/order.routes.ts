@@ -53,28 +53,71 @@ export function evaluateUserStrikes(strikesHistory: CashStrikeRecord[] = []): {
   return { activeStrikes, updatedHistory };
 }
 
-/**
- * Checks whether an order cancellation is within the 30-minute late window.
- */
-export function isLateCancellation(pickupDateStr?: string, pickupWindowStr?: string): boolean {
-  if (!pickupWindowStr) return false;
-  try {
-    const [startStr] = pickupWindowStr.split('-').map((s) => s.trim());
-    if (!startStr) return false;
+export type CancellationTier = 'GRACE' | 'ADVANCE' | 'LATE' | 'NO_SHOW';
 
-    const [hours, minutes] = startStr.split(':').map((s) => parseInt(s, 10));
-    if (isNaN(hours) || isNaN(minutes)) return false;
+/**
+ * Evaluates order cancellation tier in exact priority order (first match wins):
+ * 1. GRACE PERIOD — order placed < 5 min ago (always wins, even if pickup is <30 min away)
+ * 2. ADVANCE — >= 30 min before pickup window start
+ * 3. LATE — < 30 min before pickup, or inside pickup window (not yet expired)
+ * 4. NO-SHOW — pickup window expired, uncollected
+ */
+export function evaluateCancellationPolicy(
+  pickupDateStr?: string,
+  pickupWindowStr?: string,
+  createdAtStr?: string
+): CancellationTier {
+  // 1. GRACE PERIOD — order placed < 5 min ago (always wins)
+  if (createdAtStr) {
+    const orderAgeMinutes = (Date.now() - new Date(createdAtStr).getTime()) / (1000 * 60);
+    if (orderAgeMinutes >= 0 && orderAgeMinutes < 5) {
+      return 'GRACE';
+    }
+  }
+
+  if (!pickupWindowStr) return 'ADVANCE';
+
+  try {
+    const [startStr, endStr] = pickupWindowStr.split('-').map((s) => s.trim());
+    if (!startStr) return 'ADVANCE';
+
+    const [startHours, startMinutes] = startStr.split(':').map((s) => parseInt(s, 10));
+    if (isNaN(startHours) || isNaN(startMinutes)) return 'ADVANCE';
 
     const todayStr = pickupDateStr || new Date().toISOString().split('T')[0];
-    const pickupStart = new Date(`${todayStr}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
+    const pickupStart = new Date(`${todayStr}T${startHours.toString().padStart(2, '0')}:${startMinutes.toString().padStart(2, '0')}:00`);
+
+    let pickupEnd = new Date(pickupStart.getTime() + 2 * 60 * 60 * 1000); // default 2h window
+    if (endStr) {
+      const [endHours, endMinutes] = endStr.split(':').map((s) => parseInt(s, 10));
+      if (!isNaN(endHours) && !isNaN(endMinutes)) {
+        pickupEnd = new Date(`${todayStr}T${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}:00`);
+      }
+    }
 
     const now = new Date();
-    const diffMinutes = (pickupStart.getTime() - now.getTime()) / (1000 * 60);
+    const diffMinutesToStart = (pickupStart.getTime() - now.getTime()) / (1000 * 60);
 
-    return diffMinutes < 30;
+    // 2. ADVANCE — >= 30 min before pickup window start
+    if (diffMinutesToStart >= 30) {
+      return 'ADVANCE';
+    }
+
+    // 3. LATE — < 30 min before pickup, or inside pickup window (not yet expired)
+    if (now.getTime() <= pickupEnd.getTime()) {
+      return 'LATE';
+    }
+
+    // 4. NO-SHOW — pickup window expired, uncollected
+    return 'NO_SHOW';
   } catch {
-    return false;
+    return 'ADVANCE';
   }
+}
+
+export function isLateCancellation(pickupDateStr?: string, pickupWindowStr?: string, createdAtStr?: string): boolean {
+  const tier = evaluateCancellationPolicy(pickupDateStr, pickupWindowStr, createdAtStr);
+  return tier === 'LATE';
 }
 
 export const formatOrder = (o: any) => {
@@ -178,9 +221,12 @@ orderRouter.get('/', async (req: AuthenticatedRequest, res) => {
     }
 
     sql += ' ORDER BY created_at DESC';
+    console.log('[DEBUG GET /orders] Executing SQL:', sql, 'with params:', params);
     const rows = await query(sql, params);
+    console.log('[DEBUG GET /orders] Returning rows count:', rows.length);
     res.json(rows.map(formatOrder));
   } catch (err) {
+    console.error('[DEBUG GET /orders] Query error:', err);
     res.status(500).json({ error: 'Failed to fetch orders' });
   }
 });
@@ -269,31 +315,11 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       const rawTrust = user.trustScore !== undefined ? user.trustScore : ((user as any).trust_score !== undefined ? (user as any).trust_score : 75);
       const trustScore = Math.min(100, Math.max(0, rawTrust));
 
-      // Rule 1: Absolute Cash Lock
+      // Rule 1: Absolute Cash Lock (Only when 3 active strikes or trustScore < 50)
       if (activeStrikes >= 3 || trustScore < 50) {
         await client.query('ROLLBACK');
         return res.status(403).json({
           error: `Cash reservations are temporarily locked on this account (${activeStrikes} active strikes, Trust Score: ${trustScore}/100). Please pre-pay with Bakong KHQR or Card.`,
-        });
-      }
-
-      const activeCashRes = await client.query(
-        `SELECT COUNT(*) FROM orders 
-         WHERE customer_id = $1 
-           AND payment_method = 'CASH_AT_PICKUP' 
-           AND order_status = 'READY_FOR_PICKUP'`,
-        [user.id]
-      );
-      const activeCount = parseInt(activeCashRes.rows[0]?.count || '0', 10);
-      // Rule 2 & 3: VIP tier (>=80 trust score and < 3 strikes) allows 3; Standard allows 1
-      const maxAllowed = (trustScore >= 80 && activeStrikes < 3) ? 3 : 1;
-
-      if (activeCount >= maxAllowed) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: maxAllowed === 3
-            ? 'VIP limit reached: You already have 3 active cash reservations. Complete an order before reserving another.'
-            : 'Standard limit: You already have 1 active cash reservation. Complete your pickup or pre-pay with Bakong KHQR for unlimited orders.',
         });
       }
     }
@@ -346,12 +372,13 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
     await client.query('UPDATE users SET points = points + ($1 * 10) WHERE id = $2', [requestedQty, user.id]).catch(() => {});
 
     await client.query('COMMIT');
+    console.log('[DEBUG POST /orders] Successfully committed order:', insertedOrderRes.rows[0]?.order_number);
 
     const createdOrder = insertedOrderRes.rows[0];
     res.status(201).json(formatOrder(createdOrder));
   } catch (err: any) {
     await client.query('ROLLBACK');
-    console.error('Error creating order:', err);
+    console.error('[DEBUG POST /orders] Error creating order, ROLLED BACK:', err);
     res.status(500).json({ error: 'Failed to place order' });
   } finally {
     client.release();
@@ -546,7 +573,7 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
   try {
     await client.query('BEGIN');
 
-    const orderRes = await client.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const orderRes = await client.query('SELECT * FROM orders WHERE id = $1 OR order_number = $1', [req.params.id]);
     const order = orderRes.rows[0];
     if (!order) {
       await client.query('ROLLBACK');
@@ -563,15 +590,15 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
       return res.status(400).json({ error: 'Order is already cancelled' });
     }
 
-    await client.query('UPDATE orders SET order_status = $1 WHERE id = $2', ['CANCELLED', req.params.id]);
+    await client.query('UPDATE orders SET order_status = $1 WHERE id = $2', ['CANCELLED', order.id]);
 
     // Restore bag inventory & restore visibility ONLY if bag is active (never revive archived/draft bags)
     if (order.rescue_bag_id && order.quantity) {
       await client.query(
         `UPDATE rescue_bags
          SET quantity_remaining = quantity_remaining + $1,
-             visibility = CASE WHEN visibility = 'SOLD_OUT' AND status = 'ACTIVE' THEN 'PUBLIC' ELSE visibility END
-         WHERE id = $2 AND status != 'ARCHIVED' AND status != 'DRAFT'`,
+             visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
+         WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
         [order.quantity, order.rescue_bag_id]
       );
     }
@@ -580,63 +607,105 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
     const points = (order.quantity || 1) * 10;
     await client.query('UPDATE users SET points = GREATEST(0, points - $1) WHERE id = $2', [points, order.customer_id]).catch(() => {});
 
-    // Check if cancellation was within the late cancellation threshold (< 30 min)
-    const isLate = isLateCancellation(order.pickup_date, order.pickup_window);
-    let penaltyMessage = null;
+    // Evaluate in exact 4-tier priority order: 1. GRACE -> 2. ADVANCE -> 3. LATE -> 4. NO_SHOW
+    const tier = evaluateCancellationPolicy(order.pickup_date, order.pickup_window, order.created_at);
+    const isCash = order.payment_method === 'CASH_AT_PICKUP';
+    const orderTotal = parseFloat(order.total_price) || 0;
+    const orderSubtotal = parseFloat(order.subtotal) || orderTotal;
 
-    if (isLate && order.customer_id) {
-      const userRow = await client.query('SELECT * FROM users WHERE id = $1', [order.customer_id]);
-      if (userRow.rows[0]) {
-        const u = userRow.rows[0];
-        let history: CashStrikeRecord[] = [];
-        try {
-          history = typeof u.cash_strikes_history === 'string'
-            ? JSON.parse(u.cash_strikes_history)
-            : (u.cash_strikes_history || []);
-        } catch {
-          history = [];
+    let refundPercentage = 100;
+    let refundAmount = isCash ? 0 : orderTotal;
+    let merchantCompensation = 0;
+    let penaltyMessage = '';
+
+    if (tier === 'GRACE' || tier === 'ADVANCE') {
+      // TIER 1 (Grace <5 min) & TIER 2 (Advance >= 30 min): 100% refund, 0 strikes, 0 trust impact
+      refundPercentage = 100;
+      refundAmount = isCash ? 0 : orderTotal;
+      merchantCompensation = 0;
+      penaltyMessage = isCash
+        ? 'Free reservation cancellation with 0 penalty and 0 strikes.'
+        : `100% full refund ($${refundAmount.toFixed(2)}) processed with 0 penalty.`;
+    } else if (tier === 'LATE') {
+      // TIER 3 (Late <30 min or inside window):
+      if (isCash) {
+        // Cash: 0.5 strike, -10 trust, no money collected so no money split
+        refundPercentage = 0;
+        refundAmount = 0;
+        merchantCompensation = 0;
+        penaltyMessage = 'Late cash cancellation (<30 min before pickup): 0.5 cash strike and -10 trust points recorded.';
+
+        if (order.customer_id) {
+          const userRow = await client.query('SELECT * FROM users WHERE id = $1', [order.customer_id]);
+          if (userRow.rows[0]) {
+            const u = userRow.rows[0];
+            let history: CashStrikeRecord[] = [];
+            try {
+              history = typeof u.cash_strikes_history === 'string'
+                ? JSON.parse(u.cash_strikes_history)
+                : (u.cash_strikes_history || []);
+            } catch {
+              history = [];
+            }
+
+            const newStrike: CashStrikeRecord = {
+              id: `strk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              orderId: order.id,
+              reason: 'LATE_CANCELLATION',
+              strikeWeight: 0.5,
+              timestamp: new Date().toISOString(),
+              status: 'ACTIVE',
+            };
+            history.push(newStrike);
+
+            const { activeStrikes, updatedHistory } = evaluateUserStrikes(history);
+            const currentTrust = u.trust_score !== undefined ? u.trust_score : 75;
+            const newTrust = Math.max(0, currentTrust - 10);
+
+            await client.query(
+              `UPDATE users 
+               SET trust_score = $1, 
+                   cash_strikes = $2, 
+                   consecutive_clean_pickups = 0, 
+                   cash_strikes_history = $3 
+               WHERE id = $4`,
+              [newTrust, activeStrikes, JSON.stringify(updatedHistory), order.customer_id]
+            );
+          }
         }
-
-        const newStrike: CashStrikeRecord = {
-          id: `strk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          orderId: order.id,
-          reason: 'LATE_CANCELLATION',
-          strikeWeight: 0.5,
-          timestamp: new Date().toISOString(),
-          status: 'ACTIVE',
-        };
-        history.push(newStrike);
-
-        const { activeStrikes, updatedHistory } = evaluateUserStrikes(history);
-        const currentTrust = u.trust_score !== undefined ? u.trust_score : 75;
-        const newTrust = Math.max(0, currentTrust - 10); // Deduct 10, floored at 0
-
-        await client.query(
-          `UPDATE users 
-           SET trust_score = $1, 
-               cash_strikes = $2, 
-               consecutive_clean_pickups = 0, 
-               cash_strikes_history = $3 
-           WHERE id = $4`,
-          [newTrust, activeStrikes, JSON.stringify(updatedHistory), order.customer_id]
-        );
-        penaltyMessage = 'Late cancellation (<30 min before pickup): 0.5 strike and -10 trust points recorded.';
+      } else {
+        // Pre-paid (Bakong/Card): 50% refund to customer, 50% payout to merchant (no strike on pre-paid)
+        refundPercentage = 50;
+        refundAmount = parseFloat((orderSubtotal * 0.50).toFixed(2));
+        merchantCompensation = parseFloat((orderSubtotal * 0.50).toFixed(2));
+        penaltyMessage = `Late cancellation: 50% refund ($${refundAmount.toFixed(2)}) returned to your account, and 50% ($${merchantCompensation.toFixed(2)}) awarded to merchant for meal prep.`;
+      }
+    } else {
+      // TIER 4 (No-Show): 0% refund, 100% to merchant (or 1.0 strike for cash)
+      if (isCash) {
+        refundPercentage = 0;
+        refundAmount = 0;
+        merchantCompensation = 0;
+        penaltyMessage = 'Unclaimed cash reservation: 1.0 strike and -25 trust points recorded.';
+      } else {
+        refundPercentage = 0;
+        refundAmount = 0;
+        merchantCompensation = orderTotal;
+        penaltyMessage = `Pickup window expired: 0% refund, 100% ($${merchantCompensation.toFixed(2)}) awarded to merchant.`;
       }
     }
 
     await client.query('COMMIT');
 
-    const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
+    const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [order.id]);
     res.json({
-      id: updated.id,
-      orderNumber: updated.order_number,
-      orderStatus: updated.order_status,
-      customerId: updated.customer_id,
-      merchantId: updated.merchant_id,
-      totalPrice: parseFloat(updated.total_price),
-      isLateCancellation: isLate,
+      ...(updated ? formatOrder(updated) : formatOrder(order)),
+      cancellationTier: tier,
+      isLateCancellation: tier === 'LATE',
+      refundPercentage,
+      refundAmount,
+      merchantCompensation,
       penaltyMessage,
-      createdAt: updated.created_at,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -676,8 +745,8 @@ orderRouter.post('/:id/no-show', async (req: AuthenticatedRequest, res) => {
       await client.query(
         `UPDATE rescue_bags
          SET quantity_remaining = quantity_remaining + $1,
-             visibility = CASE WHEN visibility = 'SOLD_OUT' AND status = 'ACTIVE' THEN 'PUBLIC' ELSE visibility END
-         WHERE id = $2 AND status != 'ARCHIVED' AND status != 'DRAFT'`,
+             visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
+         WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
         [order.quantity, order.rescue_bag_id]
       ).catch(() => {});
     }

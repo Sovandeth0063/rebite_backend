@@ -54,6 +54,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    const dbInfo = await query('SELECT current_database(), current_user, inet_server_port(), (SELECT count(*) FROM orders) as orders_count');
+    res.json(dbInfo);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // All Users (for demo switcher)
 app.get('/api/users', async (req, res) => {
   try {
