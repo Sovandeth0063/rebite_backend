@@ -203,8 +203,11 @@ const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
            description = COALESCE($11, description),
            opening_hours = COALESCE($12, opening_hours),
            pickup_window_default = COALESCE($13, pickup_window_default),
-           food_categories = COALESCE($14, food_categories)
-       WHERE id = $15`,
+           food_categories = COALESCE($14, food_categories),
+           business_name_km = COALESCE($15, business_name_km),
+           latitude = COALESCE($16, latitude),
+           longitude = COALESCE($17, longitude)
+       WHERE id = $18`,
       [
         data.businessName,
         data.businessType,
@@ -218,8 +221,11 @@ const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
         data.coverUrl,
         data.description,
         data.openingHours,
-        data.pickupWindowDefault,
+        data.pickupWindowDefault || (data.pickupStart && data.pickupEnd ? `${data.pickupStart} - ${data.pickupEnd}` : null),
         data.foodCategories ? JSON.stringify(data.foodCategories) : null,
+        data.businessNameKm || data.businessName_km,
+        data.latitude !== undefined ? data.latitude : (data.lat !== undefined ? data.lat : null),
+        data.longitude !== undefined ? data.longitude : (data.lng !== undefined ? data.lng : null),
         req.params.id,
       ]
     );
@@ -231,6 +237,7 @@ const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
       businessName: updated.business_name,
       businessName_en: updated.business_name_en,
       businessName_km: updated.business_name_km,
+      businessNameKm: updated.business_name_km,
       businessType: updated.business_type,
       ownerName: updated.owner_name,
       phone: updated.phone,
@@ -240,6 +247,8 @@ const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
       city: updated.city,
       latitude: updated.latitude,
       longitude: updated.longitude,
+      lat: updated.latitude,
+      lng: updated.longitude,
       logoUrl: updated.logo_url,
       coverUrl: updated.cover_url,
       description: updated.description,
