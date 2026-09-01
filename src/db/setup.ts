@@ -58,6 +58,15 @@ export async function setupDatabase(forceRecreate: boolean = false) {
 
   // Execute schema DDL
   await pool.query(schemaSql);
+
+  // Progressive Schema Migrations for existing databases
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS trust_score INTEGER DEFAULT 75;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS cash_strikes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS consecutive_clean_pickups INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS cash_strikes_history JSONB DEFAULT '[]'::jsonb;
+  `);
+
   console.log('[PostgreSQL] Schema applied successfully.');
 
   // Check if users already seeded

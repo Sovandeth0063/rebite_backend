@@ -17,6 +17,66 @@ import { AuthenticatedRequest, recordAuditLog } from '../middleware/auth.js';
 
 export const orderRouter = Router();
 
+export interface CashStrikeRecord {
+  id: string;
+  orderId: string;
+  reason: 'LATE_CANCELLATION' | 'NO_SHOW';
+  strikeWeight: number; // 0.5 for late cancellation, 1.0 for no-show
+  timestamp: string; // ISO 8601
+  status: 'ACTIVE' | 'DECAYED' | 'REDEEMED';
+}
+
+/**
+ * Cleanly decays strikes older than 45 days.
+ */
+export function evaluateUserStrikes(strikesHistory: CashStrikeRecord[] = []): {
+  activeStrikes: number;
+  updatedHistory: CashStrikeRecord[];
+} {
+  const now = Date.now();
+  const FORTY_FIVE_DAYS_MS = 45 * 24 * 60 * 60 * 1000;
+
+  const updatedHistory = (strikesHistory || []).map((strike) => {
+    if (strike.status === 'ACTIVE') {
+      const strikeAge = now - new Date(strike.timestamp).getTime();
+      if (strikeAge > FORTY_FIVE_DAYS_MS) {
+        return { ...strike, status: 'DECAYED' as const };
+      }
+    }
+    return strike;
+  });
+
+  const activeStrikes = updatedHistory
+    .filter((s) => s.status === 'ACTIVE')
+    .reduce((acc, s) => acc + (s.strikeWeight || 1.0), 0);
+
+  return { activeStrikes, updatedHistory };
+}
+
+/**
+ * Checks whether an order cancellation is within the 30-minute late window.
+ */
+export function isLateCancellation(pickupDateStr?: string, pickupWindowStr?: string): boolean {
+  if (!pickupWindowStr) return false;
+  try {
+    const [startStr] = pickupWindowStr.split('-').map((s) => s.trim());
+    if (!startStr) return false;
+
+    const [hours, minutes] = startStr.split(':').map((s) => parseInt(s, 10));
+    if (isNaN(hours) || isNaN(minutes)) return false;
+
+    const todayStr = pickupDateStr || new Date().toISOString().split('T')[0];
+    const pickupStart = new Date(`${todayStr}T${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`);
+
+    const now = new Date();
+    const diffMinutes = (pickupStart.getTime() - now.getTime()) / (1000 * 60);
+
+    return diffMinutes < 30;
+  } catch {
+    return false;
+  }
+}
+
 export const formatOrder = (o: any) => {
   const subtotal = parseFloat(o.subtotal) || 0;
   const serviceFee = parseFloat(o.service_fee) || 0.5;
@@ -196,13 +256,24 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
 
     // Active Trust Score & Anti-Abuse Concurrency Gating for Cash Orders
     if (paymentMethod === 'CASH_AT_PICKUP') {
-      const trustScore = user.trustScore !== undefined ? user.trustScore : ((user as any).trust_score !== undefined ? (user as any).trust_score : 100);
-      const cashStrikes = user.cashStrikes !== undefined ? user.cashStrikes : ((user as any).cash_strikes !== undefined ? (user as any).cash_strikes : 0);
+      let strikesHistory: CashStrikeRecord[] = [];
+      try {
+        strikesHistory = typeof (user as any).cash_strikes_history === 'string'
+          ? JSON.parse((user as any).cash_strikes_history)
+          : ((user as any).cash_strikes_history || []);
+      } catch {
+        strikesHistory = [];
+      }
 
-      if (cashStrikes >= 3 || trustScore < 50) {
+      const { activeStrikes, updatedHistory } = evaluateUserStrikes(strikesHistory);
+      const rawTrust = user.trustScore !== undefined ? user.trustScore : ((user as any).trust_score !== undefined ? (user as any).trust_score : 75);
+      const trustScore = Math.min(100, Math.max(0, rawTrust));
+
+      // Rule 1: Absolute Cash Lock
+      if (activeStrikes >= 3 || trustScore < 50) {
         await client.query('ROLLBACK');
         return res.status(403).json({
-          error: 'Cash reservations are temporarily locked on this account due to low trust score (<50) or 3 no-show strikes. Please pre-pay with Bakong KHQR or Card.',
+          error: `Cash reservations are temporarily locked on this account (${activeStrikes} active strikes, Trust Score: ${trustScore}/100). Please pre-pay with Bakong KHQR or Card.`,
         });
       }
 
@@ -214,12 +285,15 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
         [user.id]
       );
       const activeCount = parseInt(activeCashRes.rows[0]?.count || '0', 10);
-      const maxAllowed = trustScore >= 80 ? 3 : 1;
+      // Rule 2 & 3: VIP tier (>=80 trust score and < 3 strikes) allows 3; Standard allows 1
+      const maxAllowed = (trustScore >= 80 && activeStrikes < 3) ? 3 : 1;
 
       if (activeCount >= maxAllowed) {
         await client.query('ROLLBACK');
         return res.status(400).json({
-          error: `Your Trust Tier (${trustScore}%) allows up to ${maxAllowed} active cash reservation(s). Please complete your pending pickup first.`,
+          error: maxAllowed === 3
+            ? 'VIP limit reached: You already have 3 active cash reservations. Complete an order before reserving another.'
+            : 'Standard limit: You already have 1 active cash reservation. Complete your pickup or pre-pay with Bakong KHQR for unlimited orders.',
         });
       }
     }
@@ -386,13 +460,54 @@ orderRouter.post('/scan-qr', async (req, res) => {
     );
 
     const pointsEarned = (order.quantity || 1) * 10;
-    // Award points AND redeem/forgive 1 strike for good customer behavior
-    await pool.query(
-      `UPDATE users 
-       SET points = points + $1
-       WHERE id = $2`,
-      [pointsEarned, order.customer_id]
-    ).catch(() => {});
+    // Award points AND evaluate clean pickup streak (+2 trust, every 3 clean pickups redeems 1 strike & grants +5 trust)
+    if (order.customer_id) {
+      const userRow = await pool.query('SELECT * FROM users WHERE id = $1', [order.customer_id]);
+      if (userRow.rows[0]) {
+        const u = userRow.rows[0];
+        let history: CashStrikeRecord[] = [];
+        try {
+          history = typeof u.cash_strikes_history === 'string'
+            ? JSON.parse(u.cash_strikes_history)
+            : (u.cash_strikes_history || []);
+        } catch {
+          history = [];
+        }
+
+        let { activeStrikes, updatedHistory } = evaluateUserStrikes(history);
+
+        let streak = (u.consecutive_clean_pickups || 0) + 1;
+        let currentTrust = u.trust_score !== undefined ? u.trust_score : 75;
+        currentTrust = Math.min(100, currentTrust + 2); // +2 for successful rescue
+
+        // Streak redemption: every 3 clean pickups redeems 1 oldest active strike
+        if (streak >= 3) {
+          const oldestActiveIdx = updatedHistory.findIndex((s) => s.status === 'ACTIVE');
+          if (oldestActiveIdx !== -1) {
+            updatedHistory[oldestActiveIdx] = {
+              ...updatedHistory[oldestActiveIdx],
+              status: 'REDEEMED',
+            };
+            activeStrikes = updatedHistory
+              .filter((s) => s.status === 'ACTIVE')
+              .reduce((acc, s) => acc + (s.strikeWeight || 1.0), 0);
+          }
+          currentTrust = Math.min(100, currentTrust + 5); // +5 bonus trust points
+          streak = 0; // Reset streak counter
+        }
+
+        await pool.query(
+          `UPDATE users 
+           SET points = points + $1,
+               trust_score = $2,
+               cash_strikes = $3,
+               consecutive_clean_pickups = $4,
+               cash_strikes_history = $5
+           WHERE id = $6`,
+          [pointsEarned, currentTrust, activeStrikes, streak, JSON.stringify(updatedHistory), order.customer_id]
+        ).catch(() => {});
+      }
+    }
 
     const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [order.id]);
 
@@ -425,7 +540,7 @@ orderRouter.post('/scan-qr', async (req, res) => {
   }
 });
 
-// Cancel order endpoint
+// Cancel order endpoint with 30-minute late cancellation check
 orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
   const client = await pool.connect();
   try {
@@ -465,6 +580,50 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
     const points = (order.quantity || 1) * 10;
     await client.query('UPDATE users SET points = GREATEST(0, points - $1) WHERE id = $2', [points, order.customer_id]).catch(() => {});
 
+    // Check if cancellation was within the late cancellation threshold (< 30 min)
+    const isLate = isLateCancellation(order.pickup_date, order.pickup_window);
+    let penaltyMessage = null;
+
+    if (isLate && order.customer_id) {
+      const userRow = await client.query('SELECT * FROM users WHERE id = $1', [order.customer_id]);
+      if (userRow.rows[0]) {
+        const u = userRow.rows[0];
+        let history: CashStrikeRecord[] = [];
+        try {
+          history = typeof u.cash_strikes_history === 'string'
+            ? JSON.parse(u.cash_strikes_history)
+            : (u.cash_strikes_history || []);
+        } catch {
+          history = [];
+        }
+
+        const newStrike: CashStrikeRecord = {
+          id: `strk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          orderId: order.id,
+          reason: 'LATE_CANCELLATION',
+          strikeWeight: 0.5,
+          timestamp: new Date().toISOString(),
+          status: 'ACTIVE',
+        };
+        history.push(newStrike);
+
+        const { activeStrikes, updatedHistory } = evaluateUserStrikes(history);
+        const currentTrust = u.trust_score !== undefined ? u.trust_score : 75;
+        const newTrust = Math.max(0, currentTrust - 10); // Deduct 10, floored at 0
+
+        await client.query(
+          `UPDATE users 
+           SET trust_score = $1, 
+               cash_strikes = $2, 
+               consecutive_clean_pickups = 0, 
+               cash_strikes_history = $3 
+           WHERE id = $4`,
+          [newTrust, activeStrikes, JSON.stringify(updatedHistory), order.customer_id]
+        );
+        penaltyMessage = 'Late cancellation (<30 min before pickup): 0.5 strike and -10 trust points recorded.';
+      }
+    }
+
     await client.query('COMMIT');
 
     const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
@@ -475,12 +634,101 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
       customerId: updated.customer_id,
       merchantId: updated.merchant_id,
       totalPrice: parseFloat(updated.total_price),
+      isLateCancellation: isLate,
+      penaltyMessage,
       createdAt: updated.created_at,
     });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error cancelling order:', err);
     res.status(500).json({ error: 'Failed to cancel order' });
+  } finally {
+    client.release();
+  }
+});
+
+// Report No-Show endpoint with atomic double-fire protection
+orderRouter.post('/:id/no-show', async (req: AuthenticatedRequest, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // ATOMIC STATE GUARD: Only transition if order is currently active (prevents double-firing)
+    const updateRes = await client.query(
+      `UPDATE orders 
+       SET order_status = 'NO_SHOW', escrow_status = 'VOIDED' 
+       WHERE id = $1 AND order_status IN ('READY_FOR_PICKUP', 'PENDING', 'RESERVED')
+       RETURNING *`,
+      [req.params.id]
+    );
+
+    if (updateRes.rowCount === 0 || !updateRes.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ 
+        error: 'Order was already marked completed, cancelled, or no-show. No changes made.' 
+      });
+    }
+
+    const order = updateRes.rows[0];
+
+    // Restock bag inventory if applicable
+    if (order.rescue_bag_id && order.quantity) {
+      await client.query(
+        `UPDATE rescue_bags
+         SET quantity_remaining = quantity_remaining + $1,
+             visibility = CASE WHEN visibility = 'SOLD_OUT' AND status = 'ACTIVE' THEN 'PUBLIC' ELSE visibility END
+         WHERE id = $2 AND status != 'ARCHIVED' AND status != 'DRAFT'`,
+        [order.quantity, order.rescue_bag_id]
+      ).catch(() => {});
+    }
+
+    // Penalize user: -25 trust score, +1.0 strike, reset consecutive clean pickups to 0
+    if (order.customer_id) {
+      const userRow = await client.query('SELECT * FROM users WHERE id = $1', [order.customer_id]);
+      if (userRow.rows[0]) {
+        const u = userRow.rows[0];
+        let history: CashStrikeRecord[] = [];
+        try {
+          history = typeof u.cash_strikes_history === 'string'
+            ? JSON.parse(u.cash_strikes_history)
+            : (u.cash_strikes_history || []);
+        } catch {
+          history = [];
+        }
+
+        const newStrike: CashStrikeRecord = {
+          id: `strk_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          orderId: order.id,
+          reason: 'NO_SHOW',
+          strikeWeight: 1.0,
+          timestamp: new Date().toISOString(),
+          status: 'ACTIVE',
+        };
+        history.push(newStrike);
+
+        const { activeStrikes, updatedHistory } = evaluateUserStrikes(history);
+        const currentTrust = u.trust_score !== undefined ? u.trust_score : 75;
+        const newTrust = Math.max(0, currentTrust - 25); // Deduct 25, floored at 0
+
+        await client.query(
+          `UPDATE users 
+           SET trust_score = $1, 
+               cash_strikes = $2, 
+               consecutive_clean_pickups = 0, 
+               cash_strikes_history = $3 
+           WHERE id = $4`,
+          [newTrust, activeStrikes, JSON.stringify(updatedHistory), order.customer_id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    const updated = await queryOne('SELECT * FROM orders WHERE id = $1', [order.id]);
+    res.json(formatOrder(updated));
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('Error marking order no-show:', err);
+    res.status(500).json({ error: 'Failed to record no-show' });
   } finally {
     client.release();
   }

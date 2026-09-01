@@ -58,6 +58,20 @@ export function calculateCrc16(payload: string): string {
 
 /**
 /**
+ * Truncates a UTF-8 string to a maximum byte limit safely without splitting multi-byte characters.
+ */
+export function safeUtf8ByteTruncate(str: string, maxBytes: number): string {
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.length <= maxBytes) return str;
+  let sliceEnd = maxBytes;
+  // Step backward if we landed in the middle of a multi-byte UTF-8 sequence (continuation byte starts with 10xxxxxx)
+  while (sliceEnd > 0 && (buf[sliceEnd] & 0xc0) === 0x80) {
+    sliceEnd--;
+  }
+  return buf.subarray(0, sliceEnd).toString('utf8');
+}
+
+/**
  * Helper to build EMVCo Tag-Length-Value (TLV) string with strict UTF-8 byte length
  */
 function toTlv(tag: string, value: string): string {
@@ -133,10 +147,12 @@ export function buildEmvcoKhqr(options: {
   // Tag 64: Merchant Information - Language Template (for native Khmer script display in ABA / Bakong)
   const nativeName = merchantNameKm || (/[^\x20-\x7E]/.test(merchantName) ? merchantName : null);
   if (nativeName) {
+    const safeNativeName = safeUtf8ByteTruncate(nativeName.trim(), 50);
+    const safeNativeCity = safeUtf8ByteTruncate(merchantCityKm.trim(), 25);
     const langTemplate =
       toTlv('00', 'km') +
-      toTlv('01', nativeName.substring(0, 50)) +
-      toTlv('02', merchantCityKm);
+      toTlv('01', safeNativeName) +
+      toTlv('02', safeNativeCity);
     rawPayload += toTlv('64', langTemplate);
   }
 

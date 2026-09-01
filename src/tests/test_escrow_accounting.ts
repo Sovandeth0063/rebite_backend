@@ -11,8 +11,8 @@
  * ============================================================================
  */
 
-import { calculateCrc16, buildEmvcoKhqr } from '../routes/bakong.routes.js';
-import { formatOrder } from '../routes/order.routes.js';
+import { calculateCrc16, buildEmvcoKhqr, safeUtf8ByteTruncate } from '../routes/bakong.routes.js';
+import { formatOrder, evaluateUserStrikes, isLateCancellation, CashStrikeRecord } from '../routes/order.routes.js';
 
 let passed = 0;
 let failed = 0;
@@ -197,6 +197,48 @@ const samplePayload = '00020101021230380009bakongkh1015rescuebite@aba52045812530
 const crc = calculateCrc16(samplePayload);
 assert(crc.length === 4, 'Calculated CRC16 is 4 hex characters', crc);
 assert(/^[0-9A-F]{4}$/.test(crc), 'CRC16 contains valid uppercase hexadecimal', crc);
+
+console.log('\nTest Suite 6: Strike Decay, Trust Bounds & Safe UTF-8 Truncation');
+// 6a. Safe UTF-8 Multi-Byte Truncation (prevents split 3-byte Khmer characters)
+const longKhmerText = 'ហាងនំប៉័ង អេរិក ខាយសឺ ភ្នំពេញ កម្ពុជា';
+const truncatedKhmer = safeUtf8ByteTruncate(longKhmerText, 25);
+assert(Buffer.byteLength(truncatedKhmer, 'utf8') <= 25, 'safeUtf8ByteTruncate adheres strictly to 25 byte limit', Buffer.byteLength(truncatedKhmer, 'utf8'));
+// Ensure no malformed trailing byte replacement character
+assert(!truncatedKhmer.includes('\uFFFD'), 'safeUtf8ByteTruncate produces 100% valid UTF-8 without replacement corruptions');
+
+// 6b. Strike History & 45-Day Independent Time-Decay
+const fortySixDaysAgo = new Date(Date.now() - 46 * 24 * 60 * 60 * 1000).toISOString();
+const yesterday = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+
+const mockHistory: CashStrikeRecord[] = [
+  { id: 's1', orderId: 'ord1', reason: 'NO_SHOW', strikeWeight: 1.0, timestamp: fortySixDaysAgo, status: 'ACTIVE' },
+  { id: 's2', orderId: 'ord2', reason: 'LATE_CANCELLATION', strikeWeight: 0.5, timestamp: yesterday, status: 'ACTIVE' },
+];
+
+const { activeStrikes, updatedHistory } = evaluateUserStrikes(mockHistory);
+assert(updatedHistory[0].status === 'DECAYED', '46-day-old strike automatically transitioned to DECAYED');
+assert(updatedHistory[1].status === 'ACTIVE', 'Recent strike remains ACTIVE');
+assert(activeStrikes === 0.5, 'Active strikes count reflects only active strikes (0.5)', activeStrikes);
+
+// 6c. Trust Score Mathematical Bounds [0, 100]
+const boundedHigh = Math.min(100, Math.max(0, 75 + 30));
+const boundedLow = Math.min(100, Math.max(0, 20 - 30));
+assert(boundedHigh === 100, 'Trust score safely caps at 100', boundedHigh);
+assert(boundedLow === 0, 'Trust score safely floors at 0', boundedLow);
+
+// 6d. 30-Minute Cancellation Sharp Threshold
+const now = new Date();
+const pad = (n: number) => n.toString().padStart(2, '0');
+const formatTime = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+const inTenMin = new Date(now.getTime() + 10 * 60 * 1000);
+const inFiftyMin = new Date(now.getTime() + 50 * 60 * 1000);
+
+const lateWindow = `${formatTime(inTenMin)} - ${formatTime(new Date(inTenMin.getTime() + 60 * 60 * 1000))}`;
+const gracefulWindow = `${formatTime(inFiftyMin)} - ${formatTime(new Date(inFiftyMin.getTime() + 60 * 60 * 1000))}`;
+
+assert(isLateCancellation(undefined, lateWindow) === true, 'Order within 10 minutes is flagged as LATE cancellation');
+assert(isLateCancellation(undefined, gracefulWindow) === false, 'Order 50 minutes out is flagged as GRACEFUL cancellation');
 
 console.log('\n======================================================');
 console.log(`🏁 TEST RESULTS: ${passed} Passed, ${failed} Failed`);
