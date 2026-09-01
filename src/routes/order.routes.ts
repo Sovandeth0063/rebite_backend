@@ -194,6 +194,36 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       return res.status(401).json({ error: 'User account required to place an order.' });
     }
 
+    // Active Trust Score & Anti-Abuse Concurrency Gating for Cash Orders
+    if (paymentMethod === 'CASH_AT_PICKUP') {
+      const trustScore = user.trustScore !== undefined ? user.trustScore : ((user as any).trust_score !== undefined ? (user as any).trust_score : 100);
+      const cashStrikes = user.cashStrikes !== undefined ? user.cashStrikes : ((user as any).cash_strikes !== undefined ? (user as any).cash_strikes : 0);
+
+      if (cashStrikes >= 3 || trustScore < 50) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({
+          error: 'Cash reservations are temporarily locked on this account due to low trust score (<50) or 3 no-show strikes. Please pre-pay with Bakong KHQR or Card.',
+        });
+      }
+
+      const activeCashRes = await client.query(
+        `SELECT COUNT(*) FROM orders 
+         WHERE customer_id = $1 
+           AND payment_method = 'CASH_AT_PICKUP' 
+           AND order_status = 'READY_FOR_PICKUP'`,
+        [user.id]
+      );
+      const activeCount = parseInt(activeCashRes.rows[0]?.count || '0', 10);
+      const maxAllowed = trustScore >= 80 ? 3 : 1;
+
+      if (activeCount >= maxAllowed) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `Your Trust Tier (${trustScore}%) allows up to ${maxAllowed} active cash reservation(s). Please complete your pending pickup first.`,
+        });
+      }
+    }
+
     const insertedOrderRes = await client.query(
       `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)

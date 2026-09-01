@@ -177,12 +177,19 @@ assert(tag62 !== undefined && tag62.includes('RB-2026-TEST001'), 'EMVCo Tag 62 A
 const khmerKhqr = buildEmvcoKhqr({
   amountUsd: 4.0,
   merchantName: 'ហាងនំប៉័ង Eric Kayser Bakery Phnom Penh Cambodia 1234567890',
+  merchantNameKm: 'ហាងនំប៉័ង អេរិក ខាយសឺ',
   orderNumber: 'RB-2026-VERY-LONG-ORDER-NUMBER-9999999999999999',
 });
 const khmerTlvMap = parseEmvcoTlv(khmerKhqr.qrCodeData);
 const tag59Val = khmerTlvMap.get('59') || '';
 assert(tag59Val.length <= 25, 'Tag 59 length is capped at EMVCo 25 character limit', tag59Val.length);
 assert(/^[\x20-\x7E]*$/.test(tag59Val), 'Tag 59 sanitized to valid ASCII characters for banking scanner compatibility');
+
+const tag64Val = khmerTlvMap.get('64') || '';
+assert(tag64Val.length > 0, 'Tag 64 (Merchant Information - Language Template) is populated for native Khmer display');
+assert(tag64Val.includes('km'), 'Tag 64 contains language preference km');
+assert(tag64Val.includes('ហាងនំប៉័ង'), 'Tag 64 preserves authentic native Khmer store name without gibberish stripping');
+
 const tag62Khmer = khmerTlvMap.get('62') || '';
 assert(tag62Khmer.length <= 40, 'Tag 62 length is safely bounded within EMVCo limits');
 

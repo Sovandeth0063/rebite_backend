@@ -15,6 +15,7 @@
 - **National Bank of Cambodia (NBC) Bakong Dynamic KHQR Engine:**
   - Authentic EMVCo Tag-Length-Value (TLV) payload generation with standard CRC-16 CCITT-FALSE (`0x1021`, initial `0xFFFF`) checksum calculation.
   - Deep-link quick launch buttons for **ABA Mobile**, **Bakong App**, and **Wing Bank**.
+  - **EMVCo Tag 64 (Language Template):** Native Khmer script store names (e.g. `ហាងនំប៉័ង ABC Bakery`) encoded in Tag 64 for native Khmer banking app display, with strict ASCII truncation fallback in Tag 59.
   - Production-ready placeholders for live NBC Bakong Open API & ABA PayWay token injection with seamless sandbox simulation fallback.
 
 ---
@@ -31,20 +32,20 @@
 
 ---
 
-### 3. 🛡️ Operational Safeguards, State Machine & Trust Guard
+### 3. 🛡️ Operational Safeguards, State Machine & Trust Score Gating
 - **Strict Order State Machine:**
   - Cash orders initialize in `escrowStatus: 'PENDING_COLLECTION'` (never prematurely marked `PAID_OUT`).
   - Transitions to `PAID_OUT` only when bakery staff confirms physical cash collection via QR scan.
-- **3-Strike Customer Anti-Abuse Shield:**
-  - Profiles track customer no-shows (`cashStrikes`).
-  - 3 cash no-shows locks the cash reservation option for 30 days, requiring in-app Bakong KHQR pre-payment.
-  - **Rehabilitation Engine:** Every completed pickup verified by staff automatically forgives previous strikes (`cash_strikes - 1`, `trust_score + 10`).
+- **Active Trust Score & Concurrency Gating:**
+  - **VIP Tier (`trustScore >= 80%`):** Unlocks up to **3 active concurrent cash reservations** at a time.
+  - **Standard Tier (`50% <= trustScore < 80%`):** Restricted to **1 active cash reservation** at a time to prevent multi-bag ghosting.
+  - **Low Trust Tier (`trustScore < 50%` or `cashStrikes >= 3`):** Cash reservations locked for 30 days (must pre-pay via Bakong/Card).
+- **Rehabilitation & Strike Forgiveness:**
+  - Every completed pickup verified by staff automatically forgives previous strikes (`cash_strikes - 1`, `trust_score + 10`).
 - **Merchant Cash Volume Ceiling (-$20.00 Limit):**
   - If a merchant's cash commission debt exceeds -$20.00 without incoming digital sales, cash reservations for their store are paused until settled via 1-click Bakong KHQR.
 - **Safe Auto-Restock Guard Against Race Conditions:**
   - Restock queries include strict `WHERE status != 'ARCHIVED' AND status != 'DRAFT'` filters to prevent reviving expired or draft bags on cancellation.
-- **EMVCo Unicode Sanitization:**
-  - Non-ASCII/Khmer store names (e.g. `ហាងនំប៉័ង ABC Bakery`) sanitized to safe ASCII with a strict 25-character upper bound for Tag 59 to guarantee compatibility across all mobile banking apps.
 
 ---
 
@@ -55,14 +56,14 @@
   3. No-show & explicit cancellation waivers (`VOIDED` / `REFUNDED`).
   4. NBC physical 100-riel rounding rules.
   5. Deep EMVCo TLV content-correct parser (Tag 54 amount, Tag 53 currency, Tag 58 country, Tag 62 bill number, Tag 63 CRC16).
-  6. Khmer Unicode merchant name sanitization and bounds.
-- **Test Result: 37 / 37 Unit Tests Passing (0 Failures)**.
+  6. EMVCo Tag 64 native Khmer script validation & UTF-8 byte-length assertions.
+- **Test Result: 40 / 40 Unit Tests Passing (0 Failures)**.
 
 ---
 
 ### 5. 🎨 UI/UX Redesign & Viewport Polishing
 - Redesigned **[BakongModal.tsx](file:///e:/First_Wave/ReBite/src/components/BakongModal.tsx)**: Replaced fixed-width elements with responsive action pills, centered dynamic QR cards, and viewport-safe geometry (`max-h-[92vh]`).
-- Redesigned **[CheckoutView.tsx](file:///e:/First_Wave/ReBite/src/components/CheckoutView.tsx)**: Structured 3-card layout (Order Summary, Contact Verification, Payment Selector) and high-contrast digital pickup ticket.
+- Redesigned **[CheckoutView.tsx](file:///e:/First_Wave/ReBite/src/components/CheckoutView.tsx)**: Structured 3-card layout (Order Summary, Contact Verification, Payment Selector with live Trust Score Tier status) and high-contrast digital pickup ticket.
 - Fixed `currentUser` unscoped reference and `UserIcon` JSX rendering bug.
 
 ---

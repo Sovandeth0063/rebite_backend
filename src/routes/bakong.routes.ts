@@ -57,38 +57,44 @@ export function calculateCrc16(payload: string): string {
 }
 
 /**
- * Helper to build EMVCo Tag-Length-Value (TLV) string
+/**
+ * Helper to build EMVCo Tag-Length-Value (TLV) string with strict UTF-8 byte length
  */
 function toTlv(tag: string, value: string): string {
-  const lengthStr = value.length.toString().padStart(2, '0');
+  const byteLength = Buffer.byteLength(value, 'utf8');
+  const lengthStr = byteLength.toString().padStart(2, '0');
   return `${tag}${lengthStr}${value}`;
 }
 
 /**
- * Sanitizes merchant name for EMVCo Tag 59 (max 25 ASCII characters)
+ * Sanitizes merchant name for EMVCo Tag 59 (max 25 ASCII characters fallback)
  */
 function sanitizeAscii(str: string, maxLen: number = 25): string {
-  // Strip non-ASCII or replace with safe latin alphanumeric characters
   const clean = str.replace(/[^\x20-\x7E]/g, '').trim();
   return (clean.length > 0 ? clean : 'RescueBite Store').substring(0, maxLen);
 }
 
 /**
  * Builds standard-compliant NBC Dynamic KHQR payload
+ * Supports Tag 64 (Merchant Information - Language Template) for native Khmer script
  */
 export function buildEmvcoKhqr(options: {
   amountUsd: number;
   orderNumber: string;
   merchantId?: string;
   merchantName?: string;
+  merchantNameKm?: string;
   merchantCity?: string;
+  merchantCityKm?: string;
 }): { qrCodeData: string; md5Hash: string } {
   const {
     amountUsd,
     orderNumber,
     merchantId = BAKONG_CONFIG.merchantId,
     merchantName = BAKONG_CONFIG.merchantName,
+    merchantNameKm,
     merchantCity = BAKONG_CONFIG.merchantCity,
+    merchantCityKm = 'ភ្នំពេញ',
   } = options;
 
   const formattedAmount = amountUsd.toFixed(2);
@@ -109,7 +115,7 @@ export function buildEmvcoKhqr(options: {
   // 53: Transaction Currency ("840" for USD)
   // 54: Transaction Amount
   // 58: Country Code ("KH")
-  // 59: Merchant Name
+  // 59: Merchant Name (ASCII Fallback)
   // 60: Merchant City
   // 62: Additional Data Field (Bill/Order Number)
   let rawPayload =
@@ -123,6 +129,16 @@ export function buildEmvcoKhqr(options: {
     toTlv('59', safeMerchantName) +
     toTlv('60', safeMerchantCity) +
     toTlv('62', toTlv('01', safeOrderNumber));
+
+  // Tag 64: Merchant Information - Language Template (for native Khmer script display in ABA / Bakong)
+  const nativeName = merchantNameKm || (/[^\x20-\x7E]/.test(merchantName) ? merchantName : null);
+  if (nativeName) {
+    const langTemplate =
+      toTlv('00', 'km') +
+      toTlv('01', nativeName.substring(0, 50)) +
+      toTlv('02', merchantCityKm);
+    rawPayload += toTlv('64', langTemplate);
+  }
 
   // Append Tag 63 Length (04) before computing CRC
   rawPayload += '6304';
