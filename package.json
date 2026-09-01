@@ -9,8 +9,11 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "db:setup": "tsx src/db/setup.ts",
-    "db:start": "powershell -Command \"Start-Process 'C:\\Program Files\\PostgreSQL\\14\\bin\\postgres.exe' -ArgumentList '-D', 'e:\\First_Wave\\backend\\pgdata' -WindowStyle Hidden\"",
-    "db:stop": "\"C:\\Program Files\\PostgreSQL\\14\\bin\\pg_ctl.exe\" -D e:\\First_Wave\\backend\\pgdata stop"
+    "test": "tsx src/tests/test_escrow_accounting.ts",
+    "test:escrow": "tsx src/tests/test_escrow_accounting.ts",
+    "test:live-drops": "tsx src/tests/test_live_drop_workflow.ts",
+    "db:start": "powershell -Command \"& 'C:\\Program Files\\PostgreSQL\\14\\bin\\pg_ctl.exe' -D 'e:\\First_Wave\\backend\\pgdata' start\"",
+    "db:stop": "powershell -Command \"& 'C:\\Program Files\\PostgreSQL\\14\\bin\\pg_ctl.exe' -D 'e:\\First_Wave\\backend\\pgdata' stop\""
   },
   "scriptsComments": {
     "dev": "Runs development server with hot reload via tsx on port 5000",

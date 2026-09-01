@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool, query, queryOne, testConnection } from '../config/db.js';
-import { DEMO_USERS, DEMO_MERCHANTS, DEMO_RESCUE_BAGS, INITIAL_IMPACT } from '../data/seedData.js';
+import { DEMO_USERS, DEMO_MERCHANTS, DEMO_RESCUE_BAGS, INITIAL_IMPACT, DEFAULT_CATEGORY_PRESETS } from '../data/seedData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,12 +114,33 @@ export async function setupDatabase(forceRecreate: boolean = false) {
       }
     }
 
-    // 2. Seed Merchants
+    // 2. Seed / Upsert Merchants
     for (const m of DEMO_MERCHANTS) {
       await pool.query(
         `INSERT INTO merchants (id, user_id, business_name, business_name_en, business_name_km, business_type, owner_name, phone, email, address, district, city, latitude, longitude, logo_url, cover_url, description, description_en, description_km, source_language, translation_status, is_machine_translated, rating, review_count, opening_hours, pickup_window_default, status, rejection_reason, joined_date, food_categories)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE SET
+           business_name = EXCLUDED.business_name,
+           business_name_en = EXCLUDED.business_name_en,
+           business_name_km = EXCLUDED.business_name_km,
+           business_type = EXCLUDED.business_type,
+           phone = EXCLUDED.phone,
+           email = EXCLUDED.email,
+           address = EXCLUDED.address,
+           district = EXCLUDED.district,
+           city = EXCLUDED.city,
+           latitude = EXCLUDED.latitude,
+           longitude = EXCLUDED.longitude,
+           logo_url = EXCLUDED.logo_url,
+           cover_url = EXCLUDED.cover_url,
+           description = EXCLUDED.description,
+           description_en = EXCLUDED.description_en,
+           description_km = EXCLUDED.description_km,
+           rating = EXCLUDED.rating,
+           review_count = EXCLUDED.review_count,
+           opening_hours = EXCLUDED.opening_hours,
+           pickup_window_default = EXCLUDED.pickup_window_default,
+           food_categories = EXCLUDED.food_categories`,
         [
           m.id,
           m.userId,
@@ -155,12 +176,35 @@ export async function setupDatabase(forceRecreate: boolean = false) {
       );
     }
 
-    // 3. Seed Rescue Bags
+    // 3. Seed / Upsert Rescue Bags
     for (const b of DEMO_RESCUE_BAGS) {
       await pool.query(
         `INSERT INTO rescue_bags (id, merchant_id, merchant_name, merchant_logo, merchant_rating, merchant_address, merchant_lat, merchant_lng, title, title_km, title_en, description, description_en, description_km, source_language, translation_status, is_machine_translated, category, image_url, original_price, rescue_price, discount_percentage, quantity_remaining, total_quantity, pickup_start, pickup_end, allergens, ingredients, storage_instructions, min_items, max_items, visibility, safety_confirmed, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE SET
+           merchant_name = EXCLUDED.merchant_name,
+           merchant_logo = EXCLUDED.merchant_logo,
+           merchant_rating = EXCLUDED.merchant_rating,
+           merchant_address = EXCLUDED.merchant_address,
+           merchant_lat = EXCLUDED.merchant_lat,
+           merchant_lng = EXCLUDED.merchant_lng,
+           title = EXCLUDED.title,
+           title_km = EXCLUDED.title_km,
+           title_en = EXCLUDED.title_en,
+           description = EXCLUDED.description,
+           description_en = EXCLUDED.description_en,
+           description_km = EXCLUDED.description_km,
+           category = EXCLUDED.category,
+           image_url = EXCLUDED.image_url,
+           original_price = EXCLUDED.original_price,
+           rescue_price = EXCLUDED.rescue_price,
+           discount_percentage = EXCLUDED.discount_percentage,
+           quantity_remaining = EXCLUDED.quantity_remaining,
+           total_quantity = EXCLUDED.total_quantity,
+           pickup_start = EXCLUDED.pickup_start,
+           pickup_end = EXCLUDED.pickup_end,
+           allergens = EXCLUDED.allergens,
+           ingredients = EXCLUDED.ingredients`,
         [
           b.id,
           b.merchantId,
@@ -252,9 +296,11 @@ export async function setupDatabase(forceRecreate: boolean = false) {
       { id: 'menu_item_1', merchantId: 'mer_labrioche', name: 'Artisan Butter Croissant', nameKm: 'នំប៉័ងក្រូសង់ប៊ឺរ', category: 'Bakery', basePrice: 2.50, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
       { id: 'menu_item_2', merchantId: 'mer_labrioche', name: 'Pain au Chocolat', nameKm: 'នំប៉័ងសូកូឡាបារាំង', category: 'Bakery', basePrice: 2.80, imageUrl: 'https://images.unsplash.com/photo-1530610476181-d83430b64dcd?w=400' },
       { id: 'menu_item_3', merchantId: 'mer_labrioche', name: 'French Baguette Tradition', nameKm: 'នំប៉័ងបាហ្គែតបារាំង', category: 'Bakery', basePrice: 1.80, imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=400' },
-      { id: 'menu_item_4', merchantId: 'mer_kayser', name: 'Organic Sourdough Loaf', nameKm: 'នំប៉័ងសូឌ័រធម្មជាតិ', category: 'Bakery', basePrice: 4.50, imageUrl: 'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=400' },
-      { id: 'menu_item_5', merchantId: 'mer_brown', name: 'Iced Brown Latte & Cheese Muffin', nameKm: 'កាហ្វេឡាតេទឹកកក និងម៉ាហ្វិនឈីស', category: 'Café', basePrice: 3.80, imageUrl: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?w=400' },
+      { id: 'menu_item_4', merchantId: 'mer_khema', name: 'Quiche Lorraine Maison', nameKm: 'នំគីសសាច់ជ្រូកបារាំង', category: 'Bakery', basePrice: 4.50, imageUrl: 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400' },
+      { id: 'menu_item_5', merchantId: 'mer_gerbies', name: 'Gourmet Chicken Caesar Wrap', nameKm: 'រ៉េបមាន់សេសា', category: 'Meals', basePrice: 4.80, imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400' },
       { id: 'menu_item_6', merchantId: 'mer_breadtalk', name: 'Signature Pork Flosss Bun', nameKm: 'នំប៉័ងសាច់ផាត់', category: 'Bakery', basePrice: 2.20, imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400' },
+      { id: 'menu_item_7', merchantId: 'mer_taties', name: 'Almond Frangipane Croissant', nameKm: 'ក្រូសង់អាល់ម៉ុន', category: 'Bakery', basePrice: 3.20, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
+      { id: 'menu_item_8', merchantId: 'mer_ausbake', name: 'Rustic Country Sourdough', nameKm: 'នំប៉័ងសូដូសិប្បកម្ម', category: 'Bakery', basePrice: 4.20, imageUrl: 'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=400' },
     ];
 
     for (const item of SAMPLE_MENU_ITEMS) {
@@ -263,6 +309,16 @@ export async function setupDatabase(forceRecreate: boolean = false) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
          ON CONFLICT (id) DO NOTHING`,
         [item.id, item.merchantId, item.name, item.nameKm, item.category, item.basePrice, item.imageUrl]
+      );
+    }
+
+    // 10. Seed Category Presets
+    for (const preset of DEFAULT_CATEGORY_PRESETS) {
+      await pool.query(
+        `INSERT INTO category_presets (id, business_type, name_en, name_km, icon, order_index, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO NOTHING`,
+        [preset.id, preset.businessType, preset.nameEn, preset.nameKm, preset.icon, preset.orderIndex]
       );
     }
 
@@ -276,12 +332,14 @@ export async function setupDatabase(forceRecreate: boolean = false) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const isFresh = process.argv.includes('--fresh') || process.argv.includes('--reset') || true;
   setupDatabase(isFresh)
-    .then(() => {
+    .then(async () => {
       console.log('[PostgreSQL] Setup and migrations complete!');
+      await pool.end();
       process.exit(0);
     })
-    .catch((err) => {
+    .catch(async (err) => {
       console.error('[PostgreSQL] Setup failed:', err);
+      await pool.end().catch(() => {});
       process.exit(1);
     });
 }

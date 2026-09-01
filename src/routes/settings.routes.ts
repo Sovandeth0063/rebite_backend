@@ -50,7 +50,7 @@ settingsRouter.get('/customer', async (req: AuthenticatedRequest, res) => {
       },
       paymentMethods: {
         defaultMethod: 'ABA_PAY',
-        bakongAccountId: 'dara.sok@acleda',
+        bakongAccountId: 'customer@acleda',
         abaPayPhone: '+855 12 345 678',
         savedBakongLink: true,
       },
@@ -182,8 +182,8 @@ settingsRouter.get('/merchant', async (req: AuthenticatedRequest, res) => {
       teamMembers: [
         {
           id: 'tm_1',
-          name: 'Sok Dara',
-          email: 'dara.staff@bakery.com',
+          name: 'Chan Sothea',
+          email: 'sothea.staff@bakery.com',
           role: 'STORE_MANAGER',
           addedAt: '2026-01-10',
         },
@@ -239,8 +239,8 @@ settingsRouter.get('/merchant/team', async (req: AuthenticatedRequest, res) => {
     const team = row?.settings?.teamMembers || [
       {
         id: 'tm_1',
-        name: 'Sok Dara',
-        email: 'dara.staff@bakery.com',
+        name: 'Chan Sothea',
+        email: 'sothea.staff@bakery.com',
         role: 'STORE_MANAGER',
         addedAt: '2026-01-10',
       },

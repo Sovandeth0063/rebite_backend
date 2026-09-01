@@ -30,34 +30,56 @@ export interface TableMeta {
 
 export interface Merchant {
   id: string;
-  name: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  category: string;
+  userId?: string;
+  name?: string;
+  businessName?: string;
+  businessName_en?: string;
+  businessName_km?: string;
+  businessType?: string;
+  category?: string;
+  ownerName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  district?: string;
+  city?: string;
+  latitude?: number;
+  longitude?: number;
+  logoUrl?: string;
+  coverUrl?: string;
+  imageUrl?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
-  rating: number;
-  reviewCount: number;
-  imageUrl: string;
+  rating?: number;
+  reviewCount?: number;
+  openingHours?: string;
+  pickupWindowDefault?: string;
   description?: string;
-  createdAt: string;
+  description_en?: string;
+  description_km?: string;
+  foodCategories?: string[];
+  joinedDate?: string;
+  createdAt?: string;
 }
 
 export interface AuditLog {
   id: string;
-  adminId: string;
-  adminEmail: string;
+  adminId?: string;
+  adminEmail?: string;
   action: string;
   target: string;
   details: string;
-  createdAt: string;
+  timestamp?: string;
+  createdAt?: string;
 }
 
 export interface ImpactStats {
   mealsRescued: number;
-  co2SavedKg: number;
-  moneySavedUsd: number;
-  activePartners: number;
-  wasteReductionRate: number;
+  co2SavedKg?: number;
+  co2AvoidedKg?: number;
+  foodSavedKg?: number;
+  customerSavingsUsd?: number;
+  moneySavedUsd?: number;
+  activePartners?: number;
+  activeMerchantsCount?: number;
+  wasteReductionRate?: number;
 }

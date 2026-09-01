@@ -39,6 +39,8 @@ menuItemRouter.get('/', async (req: AuthenticatedRequest, res) => {
         nameKm: r.name_km,
         category: r.category,
         basePrice: parseFloat(r.base_price),
+        quantity: r.quantity !== null && r.quantity !== undefined ? parseInt(r.quantity, 10) : 1,
+        unit: r.unit || 'piece',
         imageUrl: r.image_url,
         isActive: r.is_active,
         createdAt: r.created_at,
@@ -75,9 +77,12 @@ menuItemRouter.post('/', async (req: AuthenticatedRequest, res) => {
       return res.status(400).json({ error: 'Item name must be at least 2 characters' });
     }
 
+    const quantity = data.quantity !== undefined ? parseInt(data.quantity, 10) : 1;
+    const unit = data.unit ? data.unit.trim() : 'piece';
+
     await pool.query(
-      `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)`,
+      `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, quantity, unit, image_url, is_active, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, CURRENT_TIMESTAMP)`,
       [
         itemId,
         merchantId,
@@ -85,6 +90,8 @@ menuItemRouter.post('/', async (req: AuthenticatedRequest, res) => {
         data.nameKm ? data.nameKm.trim() : null,
         data.category || 'Bakery',
         basePrice,
+        quantity,
+        unit,
         data.imageUrl || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400',
       ]
     );
@@ -97,6 +104,8 @@ menuItemRouter.post('/', async (req: AuthenticatedRequest, res) => {
       nameKm: created.name_km,
       category: created.category,
       basePrice: parseFloat(created.base_price),
+      quantity: created.quantity !== null && created.quantity !== undefined ? parseInt(created.quantity, 10) : 1,
+      unit: created.unit || 'piece',
       imageUrl: created.image_url,
       isActive: created.is_active,
       createdAt: created.created_at,
@@ -131,21 +140,27 @@ menuItemRouter.patch('/:id', async (req: AuthenticatedRequest, res) => {
       return res.status(400).json({ error: 'Base price must be greater than $0' });
     }
 
+    const quantity = data.quantity !== undefined ? parseInt(data.quantity, 10) : undefined;
+
     await pool.query(
       `UPDATE menu_items
        SET name = COALESCE($1, name),
            name_km = COALESCE($2, name_km),
            category = COALESCE($3, category),
            base_price = COALESCE($4, base_price),
-           image_url = COALESCE($5, image_url),
-           is_active = COALESCE($6, is_active),
+           quantity = COALESCE($5, quantity),
+           unit = COALESCE($6, unit),
+           image_url = COALESCE($7, image_url),
+           is_active = COALESCE($8, is_active),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7`,
+       WHERE id = $9`,
       [
         data.name ? data.name.trim() : null,
         data.nameKm !== undefined ? data.nameKm : null,
         data.category || null,
         basePrice !== undefined ? basePrice : null,
+        quantity !== undefined ? quantity : null,
+        data.unit !== undefined ? data.unit : null,
         data.imageUrl || null,
         data.isActive !== undefined ? data.isActive : null,
         req.params.id,
@@ -160,6 +175,8 @@ menuItemRouter.patch('/:id', async (req: AuthenticatedRequest, res) => {
       nameKm: updated.name_km,
       category: updated.category,
       basePrice: parseFloat(updated.base_price),
+      quantity: updated.quantity !== null && updated.quantity !== undefined ? parseInt(updated.quantity, 10) : 1,
+      unit: updated.unit || 'piece',
       imageUrl: updated.image_url,
       isActive: updated.is_active,
       createdAt: updated.created_at,

@@ -40,7 +40,8 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(authMiddleware);
 
 // Health check
@@ -76,6 +77,24 @@ app.get('/api/users', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
+});
+
+// Current User / Me endpoint alias
+app.get('/api/users/me', (req: AuthenticatedRequest, res) => {
+  if (req.currentUser) {
+    return res.json(req.currentUser);
+  }
+  res.json({
+    id: 'usr_guest',
+    email: '',
+    name: 'Guest',
+    role: 'GUEST',
+    language: 'en',
+    points: 0,
+    referralCode: 'GUEST',
+    savedStoreIds: [],
+    createdAt: new Date().toISOString(),
+  });
 });
 
 import { crudRouter } from './routes/crud.routes.js';

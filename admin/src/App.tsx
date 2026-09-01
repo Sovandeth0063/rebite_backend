@@ -67,106 +67,106 @@ export default function App() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-neutral-950">
       
       {/* Top Administration Navigation Bar */}
-      <header className="sticky top-0 z-50 bg-neutral-900/90 backdrop-blur-md border-b border-neutral-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-50 bg-neutral-900/95 backdrop-blur-md border-b border-neutral-800/80 shadow-md">
+        <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 min-h-16 py-2.5 sm:py-0 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           
           {/* Logo & Identity */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-              <Database className="w-5 h-5" />
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-xs">
+              <Database className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-black text-sm text-white tracking-wide">RescueBite</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  PORT 3002 • ADMIN STUDIO
+                <span className="font-extrabold text-xs sm:text-sm text-white tracking-tight">RescueBite</span>
+                <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 tracking-wide">
+                  Admin Studio
                 </span>
               </div>
-              <p className="text-[10px] text-neutral-400 font-mono">Isolated CRUD &amp; Data Control Center</p>
+              <p className="text-[10px] sm:text-[11px] text-neutral-400 font-medium leading-none mt-0.5 hidden xs:block">Database &amp; Platform Operations</p>
             </div>
           </div>
 
           {/* Primary View Switcher */}
-          <nav className="flex items-center gap-1 bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs font-bold">
+          <nav className="order-3 md:order-2 w-full md:w-auto flex items-center gap-1 sm:gap-1.5 bg-neutral-950/80 p-1 sm:p-1.5 rounded-xl border border-neutral-800/80 text-xs font-semibold overflow-x-auto no-scrollbar">
             <button
               onClick={() => setActiveNav('DASHBOARD')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 text-xs ${
                 activeNav === 'DASHBOARD'
                   ? 'bg-neutral-800 text-white shadow-xs'
-                  : 'text-neutral-400 hover:text-white'
+                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
               }`}
             >
-              <LayoutDashboard className="w-3.5 h-3.5" />
+              <LayoutDashboard className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400" />
               <span>Overview</span>
             </button>
 
             <button
               onClick={() => setActiveNav('STUDIO')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 text-xs ${
                 activeNav === 'STUDIO'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-neutral-400 hover:text-white'
+                  ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
               }`}
             >
-              <Database className="w-3.5 h-3.5" />
-              <span>Database Studio (CRUD)</span>
+              <Database className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${activeNav === 'STUDIO' ? 'text-white' : 'text-emerald-400'}`} />
+              <span>Database Studio</span>
             </button>
 
             <button
               onClick={() => setActiveNav('MERCHANTS')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 text-xs ${
                 activeNav === 'MERCHANTS'
                   ? 'bg-neutral-800 text-white shadow-xs'
-                  : 'text-neutral-400 hover:text-white'
+                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
               }`}
             >
-              <Store className="w-3.5 h-3.5" />
+              <Store className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400" />
               <span>Merchants</span>
             </button>
 
             <button
               onClick={() => setActiveNav('LOGS')}
-              className={`px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 text-xs ${
                 activeNav === 'LOGS'
                   ? 'bg-neutral-800 text-white shadow-xs'
-                  : 'text-neutral-400 hover:text-white'
+                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
               }`}
             >
-              <ShieldCheck className="w-3.5 h-3.5" />
+              <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-400" />
               <span>Audit Logs</span>
             </button>
           </nav>
 
           {/* Right Links & User Controls */}
-          <div className="flex items-center gap-3">
+          <div className="order-2 md:order-3 flex items-center gap-2 sm:gap-3 shrink-0">
             <a
               href="http://localhost:3001"
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1 transition-colors font-mono hidden md:flex"
+              className="text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg bg-neutral-950/60 hover:bg-neutral-900 border border-neutral-800/80 transition-all font-medium whitespace-nowrap shrink-0"
             >
-              <span>Consumer App (3001)</span>
-              <ExternalLink className="w-3 h-3" />
+              <span className="hidden sm:inline">Consumer App</span>
+              <ExternalLink className="w-3.5 h-3.5 text-neutral-500" />
             </a>
 
-            <div className="h-4 w-px bg-neutral-800 hidden md:block" />
+            <div className="h-4 w-px bg-neutral-800" />
 
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-400 flex items-center justify-center font-black text-xs">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-950/90 border border-emerald-700/60 text-emerald-400 flex items-center justify-center font-bold text-xs shadow-xs">
                 {currentAdmin.name?.charAt(0) || 'A'}
               </div>
               <div className="text-left hidden lg:block">
-                <div className="text-xs font-bold text-white">{currentAdmin.name || 'Admin'}</div>
-                <div className="text-[10px] font-mono text-emerald-400">ADMIN</div>
+                <div className="text-xs font-bold text-neutral-200 leading-tight">{currentAdmin.name || 'Admin'}</div>
+                <div className="text-[10px] font-semibold text-emerald-400 tracking-wider">ADMINISTRATOR</div>
               </div>
             </div>
 
             <button
               onClick={handleLogout}
-              className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-red-400 transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 border border-neutral-700/50 transition-colors cursor-pointer shrink-0"
               title="Sign Out"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
 

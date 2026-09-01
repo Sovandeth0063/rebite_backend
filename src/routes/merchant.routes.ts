@@ -158,7 +158,7 @@ merchantRouter.post('/', async (req: AuthenticatedRequest, res) => {
         data.logoUrl || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200',
         data.coverUrl || 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=800',
         data.description,
-        5.0,
+        0.0,
         0,
         data.openingHours || '08:00 AM - 08:00 PM',
         data.pickupWindowDefault || '18:00 - 20:00',
@@ -450,8 +450,8 @@ merchantRouter.get('/:id/settings', async (req, res) => {
       teamMembers: [
         {
           id: 'tm_1',
-          name: 'Sok Dara',
-          email: 'dara.staff@bakery.com',
+          name: 'Chan Sothea',
+          email: 'sothea.staff@bakery.com',
           role: 'STORE_MANAGER',
           addedAt: '2026-01-10',
         },

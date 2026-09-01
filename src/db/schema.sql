@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS merchants (
   city VARCHAR(100) NOT NULL,
   latitude DOUBLE PRECISION NOT NULL,
   longitude DOUBLE PRECISION NOT NULL,
-  logo_url TEXT NOT NULL,
-  cover_url TEXT NOT NULL,
+  logo_url TEXT,
+  cover_url TEXT,
   description TEXT NOT NULL,
   description_en TEXT,
   description_km TEXT,
@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS rescue_bags (
   pickup_start VARCHAR(50) NOT NULL,
   pickup_end VARCHAR(50) NOT NULL,
   allergens JSONB DEFAULT '[]'::jsonb,
+  composition_tags JSONB DEFAULT '[]'::jsonb,
+  estimated_item_count VARCHAR(50),
+  dietary_tags JSONB DEFAULT '[]'::jsonb,
+  allergen_disclaimer TEXT,
   ingredients JSONB DEFAULT '[]'::jsonb,
   storage_instructions TEXT,
   min_items INTEGER DEFAULT 1 CHECK (min_items >= 1),
@@ -111,6 +115,17 @@ CREATE TABLE IF NOT EXISTS rescue_bags (
   escalate_minutes_before_end INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Category Presets Table (DB-backed presets by business type)
+CREATE TABLE IF NOT EXISTS category_presets (
+  id VARCHAR(100) PRIMARY KEY,
+  business_type VARCHAR(100) NOT NULL,
+  name_en VARCHAR(255) NOT NULL,
+  name_km VARCHAR(255) NOT NULL,
+  icon VARCHAR(50) NOT NULL,
+  order_index INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 4. Orders Table (Snapshot fields preserved for historical purchase integrity)

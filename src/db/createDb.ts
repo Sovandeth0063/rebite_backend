@@ -12,7 +12,7 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
 import { setupDatabase } from './setup.js';
-import { exec, spawn } from 'child_process';
+import { exec, spawn, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,45 +22,102 @@ const { Client } = pg;
 
 async function startLocalPostgresIfStopped(host: string, port: number) {
   const pgDataPath = path.resolve('pgdata');
+  const pgCtlPath = 'C:\\Program Files\\PostgreSQL\\14\\bin\\pg_ctl.exe';
   const pgExePath = 'C:\\Program Files\\PostgreSQL\\14\\bin\\postgres.exe';
 
-  if (!fs.existsSync(pgExePath) || !fs.existsSync(pgDataPath)) {
+  if (!fs.existsSync(pgDataPath)) {
     return;
   }
 
-  // Remove stale pid file if postmaster process is dead
-  const pidFile = path.join(pgDataPath, 'postmaster.pid');
-  if (fs.existsSync(pidFile)) {
-    try {
-      const pidContent = fs.readFileSync(pidFile, 'utf8');
-      const pid = parseInt(pidContent.split('\n')[0], 10);
-      let isAlive = false;
-      try {
-        process.kill(pid, 0);
-        isAlive = true;
-      } catch {
-        isAlive = false;
-      }
-      if (!isAlive) {
-        fs.unlinkSync(pidFile);
-        console.log('[PostgreSQL] Removed stale postmaster.pid file.');
-      }
-    } catch {}
+  // Pre-check if PostgreSQL is already responsive or starting up
+  try {
+    const testClient = new Client({
+      host,
+      port,
+      user: process.env.PGUSER || 'postgres',
+      password: process.env.PGPASSWORD || 'postgres',
+      database: 'postgres',
+      connectionTimeoutMillis: 1000,
+    });
+    await testClient.connect();
+    await testClient.end();
+    // Already running and connected
+    return;
+  } catch (err: any) {
+    if (err.message?.includes('the database system is starting up') || err.code === '57P03') {
+      // Postgres is already starting up, do not spawn another instance
+      return;
+    }
   }
 
-  console.log(`[PostgreSQL] Attempting auto-start on local cluster (port ${port})...`);
+  console.log(`[PostgreSQL] Starting background database service on port ${port}...`);
   try {
-    const child = spawn(pgExePath, ['-D', pgDataPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.unref();
-    // Wait for postgres to be ready
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (fs.existsSync(pgCtlPath)) {
+      const child: any = spawn(pgCtlPath, ['-D', pgDataPath, 'start'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        creationFlags: 0x08000000, // CREATE_NO_WINDOW flag for Windows
+      } as any);
+      child?.unref?.();
+    } else if (fs.existsSync(pgExePath)) {
+      const child: any = spawn(pgExePath, ['-D', pgDataPath], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+        creationFlags: 0x08000000, // CREATE_NO_WINDOW flag for Windows
+      } as any);
+      child?.unref?.();
+    }
   } catch (err: any) {
     console.warn(`[PostgreSQL] Auto-start attempt error: ${err.message}`);
   }
+}
+
+async function connectWithRetry(
+  clientConfig: pg.ClientConfig,
+  maxRetries = 15,
+  delayMs = 1000
+): Promise<pg.Client> {
+  let autoStartAttempted = false;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const client = new Client(clientConfig);
+    try {
+      await client.connect();
+      // Test basic query to make sure database is ready to accept queries
+      await client.query('SELECT 1');
+      return client;
+    } catch (err: any) {
+      try {
+        await client.end();
+      } catch {}
+
+      const msg = err.message || '';
+      const isRefused = err.code === 'ECONNREFUSED' || msg.includes('ECONNREFUSED');
+      const isStartingUp = msg.includes('the database system is starting up') || err.code === '57P03';
+
+      if (isRefused && !autoStartAttempted) {
+        autoStartAttempted = true;
+        await startLocalPostgresIfStopped(
+          (clientConfig.host as string) || 'localhost',
+          (clientConfig.port as number) || 5432
+        );
+      }
+
+      if (attempt < maxRetries) {
+        if (isStartingUp) {
+          console.log(`[PostgreSQL] Database system is initializing/starting up... waiting (attempt ${attempt}/${maxRetries})`);
+        } else if (isRefused) {
+          console.log(`[PostgreSQL] Waiting for database cluster on port ${clientConfig.port}... (attempt ${attempt}/${maxRetries})`);
+        }
+        await new Promise((res) => setTimeout(res, delayMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('PostgreSQL connection timed out waiting for server readiness');
 }
 
 export async function ensureDatabaseAndSchema() {
@@ -70,38 +127,18 @@ export async function ensureDatabaseAndSchema() {
   const password = process.env.PGPASSWORD || 'postgres';
   const targetDb = process.env.PGDATABASE || 'rescuebite';
 
-  // 1. Connect to root 'postgres' db to ensure target database exists
-  let rootClient = new Client({
-    host,
-    port,
-    user,
-    password,
-    database: 'postgres',
-    connectionTimeoutMillis: 3000,
-  });
-
+  // 1. Connect to root 'postgres' db with retry to ensure target database exists
+  let rootClient: pg.Client | null = null;
   try {
-    await rootClient.connect();
-  } catch (connectErr: any) {
-    if (connectErr.code === 'ECONNREFUSED' || connectErr.message?.includes('ECONNREFUSED')) {
-      await startLocalPostgresIfStopped(host, port);
-      rootClient = new Client({
-        host,
-        port,
-        user,
-        password,
-        database: 'postgres',
-        connectionTimeoutMillis: 4000,
-      });
-      try {
-        await rootClient.connect();
-      } catch (retryErr: any) {
-        console.warn(`[PostgreSQL] Could not connect to root db after auto-start: ${retryErr.message}`);
-      }
-    }
-  }
+    rootClient = await connectWithRetry({
+      host,
+      port,
+      user,
+      password,
+      database: 'postgres',
+      connectionTimeoutMillis: 3000,
+    });
 
-  try {
     const checkDb = await rootClient.query('SELECT 1, pg_encoding_to_char(encoding) as enc FROM pg_database WHERE datname = $1', [targetDb]);
     if (checkDb.rows.length === 0) {
       console.log(`[PostgreSQL] Database "${targetDb}" not found. Creating database with UTF-8 encoding...`);
@@ -116,9 +153,11 @@ export async function ensureDatabaseAndSchema() {
   } catch (err: any) {
     console.warn(`[PostgreSQL] Root DB check warning: ${err.message}`);
   } finally {
-    try {
-      await rootClient.end();
-    } catch {}
+    if (rootClient) {
+      try {
+        await rootClient.end();
+      } catch {}
+    }
   }
 
   // 2. Setup schema and seed

@@ -12,9 +12,9 @@ export const AuditLogsView: React.FC = () => {
     try {
       setLoading(true);
       const data = await adminApi.getAuditLogs();
-      setLogs(data);
+      setLogs(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error(err);
+      console.error('Failed to load audit logs:', err);
     } finally {
       setLoading(false);
     }
@@ -24,18 +24,20 @@ export const AuditLogsView: React.FC = () => {
     fetchLogs();
   }, []);
 
-  const filtered = logs.filter(
-    (l) =>
-      l.action.toLowerCase().includes(search.toLowerCase()) ||
-      l.target.toLowerCase().includes(search.toLowerCase()) ||
-      l.details.toLowerCase().includes(search.toLowerCase()) ||
-      l.adminEmail.toLowerCase().includes(search.toLowerCase())
-  );
+  const q = search.toLowerCase().trim();
+  const filtered = logs.filter((l) => {
+    if (!q) return true;
+    const action = (l.action || '').toLowerCase();
+    const target = (l.target || '').toLowerCase();
+    const details = (l.details || '').toLowerCase();
+    const email = (l.adminEmail || '').toLowerCase();
+    return action.includes(q) || target.includes(q) || details.includes(q) || email.includes(q);
+  });
 
   return (
     <div className="space-y-4">
       {/* Search Header */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 flex items-center justify-between gap-3">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-md">
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
           <span className="text-sm font-bold text-white">System Security &amp; Audit Trail</span>
@@ -50,14 +52,16 @@ export const AuditLogsView: React.FC = () => {
               placeholder="Search audit logs..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-medium text-white placeholder:text-neutral-600 focus:outline-hidden focus:border-emerald-500"
+              className="pl-8 pr-3 py-1.5 bg-neutral-950 border border-neutral-800 rounded-xl text-xs font-medium text-white placeholder:text-neutral-600 focus:outline-hidden focus:border-emerald-500 w-64"
             />
           </div>
           <button
             onClick={fetchLogs}
-            className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white cursor-pointer"
+            disabled={loading}
+            className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white cursor-pointer transition-all"
+            title="Refresh Audit Logs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
           </button>
         </div>
       </div>
@@ -76,27 +80,40 @@ export const AuditLogsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800 font-mono">
-              {filtered.map((log) => (
-                <tr key={log.id} className="hover:bg-neutral-800/40 transition-colors">
-                  <td className="p-3 text-neutral-400 whitespace-nowrap">
-                    {new Date(log.createdAt).toLocaleString()}
-                  </td>
-                  <td className="p-3 text-white font-sans font-semibold whitespace-nowrap">
-                    {log.adminEmail}
-                  </td>
-                  <td className="p-3">
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                      {log.action}
-                    </span>
-                  </td>
-                  <td className="p-3 text-amber-300 font-semibold whitespace-nowrap">
-                    {log.target}
-                  </td>
-                  <td className="p-3 text-neutral-300">
-                    {log.details}
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-neutral-500 font-sans">
+                    {loading ? 'Loading audit records...' : 'No audit log entries recorded yet.'}
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((log) => {
+                  const dateStr = log.createdAt || log.timestamp;
+                  const dateFormatted = dateStr ? new Date(dateStr).toLocaleString() : 'N/A';
+
+                  return (
+                    <tr key={log.id} className="hover:bg-neutral-800/40 transition-colors">
+                      <td className="p-3 text-neutral-400 whitespace-nowrap">
+                        {dateFormatted}
+                      </td>
+                      <td className="p-3 text-white font-sans font-semibold whitespace-nowrap">
+                        {log.adminEmail || 'System Agent'}
+                      </td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                          {log.action || 'OP'}
+                        </span>
+                      </td>
+                      <td className="p-3 text-amber-300 font-semibold whitespace-nowrap">
+                        {log.target || '-'}
+                      </td>
+                      <td className="p-3 text-neutral-300">
+                        {log.details || '-'}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

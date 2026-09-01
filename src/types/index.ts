@@ -23,6 +23,8 @@ export interface User {
   referralCode: string;
   referredBy?: string;
   savedStoreIds: string[];
+  cashStrikes?: number;
+  trustScore?: number;
   createdAt: string;
 }
 
@@ -65,6 +67,7 @@ export interface Merchant {
   translationStatus?: 'PENDING' | 'COMPLETED' | 'FAILED';
   isMachineTranslated?: boolean;
   rating: number;
+  bayesianRating?: number;
   reviewCount: number;
   openingHours: string;
   pickupWindowDefault: string;
@@ -105,6 +108,10 @@ export interface RescueBag {
   pickupStart: string;
   pickupEnd: string;
   tags?: string[];
+  compositionTags?: string[];
+  estimatedItemCount?: string;
+  dietaryTags?: string[];
+  allergenDisclaimer?: string;
   allergens?: string[];
   dietary?: string[];
   co2SavedKg?: number;
@@ -119,6 +126,15 @@ export interface RescueBag {
   escalatedDiscountPercentage?: number;
   escalateMinutesBeforeEnd?: number;
   createdAt: string;
+}
+
+export interface CategoryPreset {
+  id: string;
+  businessType: string;
+  nameEn: string;
+  nameKm: string;
+  icon: string;
+  orderIndex: number;
 }
 
 export type OrderStatus =
@@ -145,6 +161,12 @@ export interface Order {
   subtotal: number;
   serviceFee: number;
   totalPrice: number;
+  commissionRate?: number;
+  commissionAmount?: number;
+  merchantNetAmount?: number;
+  escrowStatus?: 'PENDING_COLLECTION' | 'HELD_IN_ESCROW' | 'PAID_OUT' | 'VOIDED' | 'REFUNDED';
+  cashDueAtPickup?: number;
+  amountPaidInApp?: number;
   pickupDate: string;
   pickupWindow: string;
   paymentMethod: 'ABA_PAY' | 'CARD' | 'CASH_AT_PICKUP';
@@ -175,6 +197,14 @@ export interface Review {
   foodQualityRating?: number;
   valueRating?: number;
   pickupExperienceRating?: number;
+  merchantReply?: string;
+  merchantRepliedAt?: string;
+  consumedInWindow?: boolean;
+  isFlagged?: boolean;
+  flagReason?: string;
+  moderationStatus?: 'APPROVED' | 'PENDING_MODERATION' | 'FLAGGED' | 'HIDDEN_BY_ADMIN';
+  isSuspiciousIp?: boolean;
+  isVerifiedPurchase?: boolean;
   createdAt: string;
 }
 
@@ -369,6 +399,8 @@ export interface MenuItem {
   nameKm?: string;
   category: BusinessCategory;
   basePrice: number;
+  quantity?: number;
+  unit?: string;
   imageUrl?: string;
   isActive: boolean;
   createdAt: string;
@@ -390,6 +422,7 @@ export interface LiveListing {
   itemNameKm?: string;
   imageUrl?: string;
   quantityLeft: number;
+  unit?: string;
   discountPct: number;
   rescuePrice: number;
   originalPrice: number;
