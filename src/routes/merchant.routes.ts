@@ -19,60 +19,103 @@ import { Router } from 'express';
 import { pool, query, queryOne } from '../config/db.js';
 import { AuthenticatedRequest, recordAuditLog } from '../middleware/auth.js';
 import { asyncTranslateMerchant } from '../services/translation.js';
+import { validateGeoParams } from '../utils/geo.js';
 
 export const merchantRouter = Router();
 
-// Get all merchants
+// Get all merchants (with optional spatial distance calculation, radius filtering, and KNN proximity sorting)
 merchantRouter.get('/', async (req, res) => {
-  const { status, city, category } = req.query;
+  const { status, city, category, lat, lng, radius, sortBy, limit, offset } = req.query;
+
+  // 1. Strict Geo Input Validation
+  const geoValidation = validateGeoParams(lat, lng, radius);
+  if (!geoValidation.isValid) {
+    return res.status(400).json({ error: geoValidation.error });
+  }
+
+  const hasGeo = geoValidation.lat != null && geoValidation.lng != null;
+
   try {
-    let sql = 'SELECT * FROM merchants WHERE 1=1';
     const params: any[] = [];
+    let selectFields = 'm.*';
+
+    if (hasGeo) {
+      params.push(geoValidation.lat, geoValidation.lng);
+      selectFields += `, ROUND(earth_distance(ll_to_earth(m.latitude, m.longitude), ll_to_earth($1, $2))::numeric, 1) AS distance_m`;
+    }
+
+    let sql = `SELECT ${selectFields} FROM merchants m WHERE 1=1`;
 
     if (status) {
       params.push(status);
-      sql += ` AND status = $${params.length}`;
+      sql += ` AND m.status = $${params.length}`;
     }
     if (city) {
       params.push(city);
-      sql += ` AND city = $${params.length}`;
+      sql += ` AND m.city = $${params.length}`;
     }
 
-    sql += ' ORDER BY rating DESC, review_count DESC';
+    // Spatial bounding-box radius filter
+    if (hasGeo && geoValidation.radiusMeters) {
+      params.push(geoValidation.radiusMeters);
+      sql += ` AND earth_box(ll_to_earth($1, $2), $${params.length}) @> ll_to_earth(m.latitude, m.longitude)`;
+    }
+
+    // Sorting strategy
+    if (hasGeo && sortBy === 'DISTANCE') {
+      sql += ' ORDER BY earth_distance(ll_to_earth(m.latitude, m.longitude), ll_to_earth($1, $2)) ASC';
+    } else {
+      sql += ' ORDER BY m.rating DESC, m.review_count DESC';
+    }
+
+    if (limit) {
+      params.push(parseInt(limit as string, 10));
+      sql += ` LIMIT $${params.length}`;
+    }
+    if (offset) {
+      params.push(parseInt(offset as string, 10));
+      sql += ` OFFSET $${params.length}`;
+    }
+
     const rows = await query(sql, params);
 
-    const merchants = rows.map((m) => ({
-      id: m.id,
-      userId: m.user_id,
-      businessName: m.business_name,
-      businessName_en: m.business_name_en,
-      businessName_km: m.business_name_km,
-      businessType: m.business_type,
-      ownerName: m.owner_name,
-      phone: m.phone,
-      email: m.email,
-      address: m.address,
-      district: m.district,
-      city: m.city,
-      latitude: m.latitude,
-      longitude: m.longitude,
-      logoUrl: m.logo_url,
-      coverUrl: m.cover_url,
-      description: m.description,
-      description_en: m.description_en,
-      description_km: m.description_km,
-      sourceLanguage: m.source_language,
-      translationStatus: m.translation_status,
-      isMachineTranslated: m.is_machine_translated,
-      rating: m.rating,
-      reviewCount: m.review_count,
-      openingHours: m.opening_hours,
-      pickupWindowDefault: m.pickup_window_default,
-      status: m.status,
-      rejectionReason: m.rejection_reason,
-      joinedDate: m.joined_date,
-      foodCategories: m.food_categories || [],
-    }));
+    const merchants = rows.map((m) => {
+      const distM = m.distance_m != null ? parseFloat(m.distance_m) : undefined;
+      return {
+        id: m.id,
+        userId: m.user_id,
+        businessName: m.business_name,
+        businessName_en: m.business_name_en,
+        businessName_km: m.business_name_km,
+        businessType: m.business_type,
+        ownerName: m.owner_name,
+        phone: m.phone,
+        email: m.email,
+        address: m.address,
+        district: m.district,
+        city: m.city,
+        latitude: m.latitude,
+        longitude: m.longitude,
+        logoUrl: m.logo_url,
+        coverUrl: m.cover_url,
+        description: m.description,
+        description_en: m.description_en,
+        description_km: m.description_km,
+        sourceLanguage: m.source_language,
+        translationStatus: m.translation_status,
+        isMachineTranslated: m.is_machine_translated,
+        rating: m.rating,
+        reviewCount: m.review_count,
+        openingHours: m.opening_hours,
+        pickupWindowDefault: m.pickup_window_default,
+        status: m.status,
+        rejectionReason: m.rejection_reason,
+        joinedDate: m.joined_date,
+        foodCategories: m.food_categories || [],
+        distance_m: distM,
+        distance: distM != null ? parseFloat((distM / 1000).toFixed(2)) : undefined,
+      };
+    });
 
     if (category) {
       const filtered = merchants.filter((m) =>
@@ -82,19 +125,34 @@ merchantRouter.get('/', async (req, res) => {
     }
 
     res.json(merchants);
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error fetching merchants:', err);
     res.status(500).json({ error: 'Failed to fetch merchants' });
   }
 });
 
-// Get single merchant
+// Get single merchant (with optional distance calculation if lat/lng provided)
 merchantRouter.get('/:id', async (req, res) => {
+  const { lat, lng } = req.query;
+  const geoValidation = validateGeoParams(lat, lng);
+  const hasGeo = geoValidation.isValid && geoValidation.lat != null && geoValidation.lng != null;
+
   try {
-    const m = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
+    let sql = 'SELECT * FROM merchants WHERE id = $1';
+    const params: any[] = [req.params.id];
+
+    if (hasGeo) {
+      sql = `SELECT m.*, ROUND(earth_distance(ll_to_earth(m.latitude, m.longitude), ll_to_earth($2, $3))::numeric, 1) AS distance_m FROM merchants m WHERE m.id = $1`;
+      params.push(geoValidation.lat, geoValidation.lng);
+    }
+
+    const m = await queryOne(sql, params);
     if (!m) {
       return res.status(404).json({ error: 'Merchant not found' });
     }
+
+    const distM = m.distance_m != null ? parseFloat(m.distance_m) : undefined;
+
     res.json({
       id: m.id,
       userId: m.user_id,
@@ -126,6 +184,8 @@ merchantRouter.get('/:id', async (req, res) => {
       rejectionReason: m.rejection_reason,
       joinedDate: m.joined_date,
       foodCategories: m.food_categories || [],
+      distance_m: distM,
+      distance: distM != null ? parseFloat((distM / 1000).toFixed(2)) : undefined,
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch merchant' });

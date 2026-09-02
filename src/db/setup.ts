@@ -80,6 +80,28 @@ export async function setupDatabase(forceRecreate: boolean = false) {
     ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS has_auto_escalating_discount BOOLEAN DEFAULT FALSE;
     ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS escalated_discount_percentage INTEGER;
     ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS escalate_minutes_before_end INTEGER;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS bayesian_rating DOUBLE PRECISION DEFAULT 5.0;
+
+    ALTER TABLE merchants ADD COLUMN IF NOT EXISTS bayesian_rating DOUBLE PRECISION DEFAULT 5.0;
+
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS consumed_in_window BOOLEAN DEFAULT TRUE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS is_suspicious_ip BOOLEAN DEFAULT FALSE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS moderation_status VARCHAR(50) DEFAULT 'APPROVED';
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS merchant_reply TEXT;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS merchant_replied_at TIMESTAMP WITH TIME ZONE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS food_quality_rating INTEGER;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS value_rating INTEGER;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS pickup_experience_rating INTEGER;
+
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS addons JSONB DEFAULT '[]'::jsonb;
+    UPDATE orders SET addons = '[]'::jsonb WHERE addons IS NULL;
+
+    -- Spatial Extensions & GIST indexes
+    CREATE EXTENSION IF NOT EXISTS cube;
+    CREATE EXTENSION IF NOT EXISTS earthdistance;
+    CREATE INDEX IF NOT EXISTS idx_merchants_earth_active ON merchants USING GIST (ll_to_earth(latitude, longitude)) WHERE status = 'APPROVED';
+    CREATE INDEX IF NOT EXISTS idx_merchants_earth ON merchants USING GIST (ll_to_earth(latitude, longitude));
   `);
 
   console.log('[PostgreSQL] Schema applied successfully.');

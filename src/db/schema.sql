@@ -2,12 +2,17 @@
 -- File: src/db/schema.sql
 -- Purpose: Production-Grade PostgreSQL Database Schema (DDL)
 -- Features:
+--   - Native PostGIS / earthdistance Great-Circle Distance & Bounding Box support
 --   - Full Foreign Key integrity (ON DELETE CASCADE / SET NULL)
 --   - Check Constraints (Ratings 1-5, Discounts 0-100%, Status enums, Positive prices)
 --   - Auto-updating `updated_at` trigger function on mutable tables
 --   - Multi-column and foreign-key performance indexes
 --   - Native JSONB and TIMESTAMP WITH TIME ZONE support
 -- ============================================================================
+
+-- Spatial Extensions for Great-Circle Distance & Bounding Box Indexing
+CREATE EXTENSION IF NOT EXISTS cube;
+CREATE EXTENSION IF NOT EXISTS earthdistance;
 
 -- 0. Shared Trigger Function for updated_at timestamps
 CREATE OR REPLACE FUNCTION set_updated_at()
@@ -64,6 +69,7 @@ CREATE TABLE IF NOT EXISTS merchants (
   translation_status VARCHAR(20),
   is_machine_translated BOOLEAN DEFAULT FALSE,
   rating DOUBLE PRECISION DEFAULT 5.0 CHECK (rating >= 0.0 AND rating <= 5.0),
+  bayesian_rating DOUBLE PRECISION DEFAULT 5.0,
   review_count INTEGER DEFAULT 0 CHECK (review_count >= 0),
   opening_hours VARCHAR(100) NOT NULL,
   pickup_window_default VARCHAR(100) NOT NULL,
@@ -82,6 +88,7 @@ CREATE TABLE IF NOT EXISTS rescue_bags (
   merchant_name VARCHAR(255) NOT NULL,
   merchant_logo TEXT NOT NULL,
   merchant_rating DOUBLE PRECISION DEFAULT 5.0 CHECK (merchant_rating >= 0.0 AND merchant_rating <= 5.0),
+  bayesian_rating DOUBLE PRECISION DEFAULT 5.0,
   merchant_address TEXT NOT NULL,
   merchant_lat DOUBLE PRECISION NOT NULL,
   merchant_lng DOUBLE PRECISION NOT NULL,
@@ -182,6 +189,12 @@ CREATE TABLE IF NOT EXISTS reviews (
   food_quality_rating INTEGER CHECK (food_quality_rating IS NULL OR (food_quality_rating >= 1 AND food_quality_rating <= 5)),
   value_rating INTEGER CHECK (value_rating IS NULL OR (value_rating >= 1 AND value_rating <= 5)),
   pickup_experience_rating INTEGER CHECK (pickup_experience_rating IS NULL OR (pickup_experience_rating >= 1 AND pickup_experience_rating <= 5)),
+  consumed_in_window BOOLEAN DEFAULT TRUE,
+  is_suspicious_ip BOOLEAN DEFAULT FALSE,
+  moderation_status VARCHAR(50) DEFAULT 'APPROVED',
+  is_hidden BOOLEAN DEFAULT FALSE,
+  merchant_reply TEXT,
+  merchant_replied_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -396,6 +409,9 @@ CREATE TRIGGER trg_live_listings_updated_at
 -- ============================================================================
 CREATE INDEX IF NOT EXISTS idx_merchants_user ON merchants(user_id);
 CREATE INDEX IF NOT EXISTS idx_merchants_status ON merchants(status);
+-- Spatial GIST Index for Sub-Millisecond Distance & Bounding-Box Proximity Filtering
+CREATE INDEX IF NOT EXISTS idx_merchants_earth_active ON merchants USING GIST (ll_to_earth(latitude, longitude)) WHERE status = 'APPROVED';
+CREATE INDEX IF NOT EXISTS idx_merchants_earth ON merchants USING GIST (ll_to_earth(latitude, longitude));
 CREATE INDEX IF NOT EXISTS idx_rescue_bags_merchant_visibility ON rescue_bags(merchant_id, visibility);
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders(merchant_id);

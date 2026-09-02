@@ -15,10 +15,13 @@ import { Router } from 'express';
 import { pool, query, queryOne } from '../config/db.js';
 import { AuthenticatedRequest, recordAuditLog } from '../middleware/auth.js';
 import { asyncTranslateRescueBag } from '../services/translation.js';
+import { validateGeoParams } from '../utils/geo.js';
 
 export const rescueBagRouter = Router();
 
-export const formatRescueBag = (b: any) => ({
+export const formatRescueBag = (b: any) => {
+  const distM = b.distance_m != null ? parseFloat(b.distance_m) : undefined;
+  return {
     id: b.id,
     merchantId: b.merchant_id,
     merchantName: b.merchant_name,
@@ -27,6 +30,8 @@ export const formatRescueBag = (b: any) => ({
     merchantAddress: b.merchant_address,
     merchantLat: b.merchant_lat,
     merchantLng: b.merchant_lng,
+    distance_m: distM,
+    distance: distM != null ? parseFloat((distM / 1000).toFixed(2)) : undefined,
     title: b.title,
     titleKm: b.title_km,
     title_en: b.title_en,
@@ -62,7 +67,8 @@ export const formatRescueBag = (b: any) => ({
     escalatedDiscountPercentage: b.escalated_discount_percentage,
     escalateMinutesBeforeEnd: b.escalate_minutes_before_end,
     createdAt: b.created_at,
-});
+  };
+};
 
 // Get category composition presets
 rescueBagRouter.get('/presets', async (req, res) => {
@@ -91,30 +97,67 @@ rescueBagRouter.get('/presets', async (req, res) => {
   }
 });
 
-// Get all rescue bags
+// Get all rescue bags (with optional spatial distance calculation, radius filtering, and KNN proximity sorting)
 rescueBagRouter.get('/', async (req, res) => {
-  const { merchantId, category, maxPrice, search, availableOnly } = req.query;
+  const { merchantId, category, maxPrice, search, availableOnly, lat, lng, radius, sortBy, limit, offset } = req.query;
+
+  // 1. Strict Geo Input Validation
+  const geoValidation = validateGeoParams(lat, lng, radius);
+  if (!geoValidation.isValid) {
+    return res.status(400).json({ error: geoValidation.error });
+  }
+
+  const hasGeo = geoValidation.lat != null && geoValidation.lng != null;
+
   try {
-    let sql = 'SELECT * FROM rescue_bags WHERE 1=1';
     const params: any[] = [];
+    let selectFields = 'rb.*';
+
+    if (hasGeo) {
+      params.push(geoValidation.lat, geoValidation.lng);
+      selectFields += `, ROUND(earth_distance(ll_to_earth(rb.merchant_lat, rb.merchant_lng), ll_to_earth($1, $2))::numeric, 1) AS distance_m`;
+    }
+
+    let sql = `SELECT ${selectFields} FROM rescue_bags rb WHERE 1=1`;
 
     if (merchantId) {
       params.push(merchantId);
-      sql += ` AND merchant_id = $${params.length}`;
+      sql += ` AND rb.merchant_id = $${params.length}`;
     }
     if (category) {
       params.push(category);
-      sql += ` AND category = $${params.length}`;
+      sql += ` AND rb.category = $${params.length}`;
     }
     if (maxPrice) {
       params.push(parseFloat(maxPrice as string));
-      sql += ` AND rescue_price <= $${params.length}`;
+      sql += ` AND rb.rescue_price <= $${params.length}`;
     }
     if (availableOnly === 'true') {
-      sql += ' AND quantity_remaining > 0 AND visibility = \'PUBLIC\'';
+      sql += " AND rb.quantity_remaining > 0 AND rb.visibility = 'PUBLIC'";
     }
 
-    sql += ' ORDER BY created_at DESC';
+    // Spatial bounding-box radius filter
+    if (hasGeo && geoValidation.radiusMeters) {
+      params.push(geoValidation.radiusMeters);
+      sql += ` AND earth_box(ll_to_earth($1, $2), $${params.length}) @> ll_to_earth(rb.merchant_lat, rb.merchant_lng)`;
+    }
+
+    // Sorting strategy
+    if (hasGeo && sortBy === 'DISTANCE') {
+      sql += ' ORDER BY earth_distance(ll_to_earth(rb.merchant_lat, rb.merchant_lng), ll_to_earth($1, $2)) ASC, rb.created_at DESC';
+    } else {
+      sql += ' ORDER BY rb.created_at DESC';
+    }
+
+    if (limit) {
+      params.push(parseInt(limit as string, 10));
+      sql += ` LIMIT $${params.length}`;
+    }
+    if (offset) {
+      params.push(parseInt(offset as string, 10));
+      sql += ` OFFSET $${params.length}`;
+    }
+
     const rows = await query(sql, params);
     let bags = rows.map(formatRescueBag);
 
@@ -135,54 +178,28 @@ rescueBagRouter.get('/', async (req, res) => {
   }
 });
 
-// Get single rescue bag
+// Get single rescue bag (with optional distance calculation if lat/lng provided)
 rescueBagRouter.get('/:id', async (req, res) => {
+  const { lat, lng } = req.query;
+  const geoValidation = validateGeoParams(lat, lng);
+  const hasGeo = geoValidation.isValid && geoValidation.lat != null && geoValidation.lng != null;
+
   try {
-    const b = await queryOne('SELECT * FROM rescue_bags WHERE id = $1', [req.params.id]);
+    let sql = 'SELECT * FROM rescue_bags WHERE id = $1';
+    const params: any[] = [req.params.id];
+
+    if (hasGeo) {
+      sql = `SELECT rb.*, ROUND(earth_distance(ll_to_earth(rb.merchant_lat, rb.merchant_lng), ll_to_earth($2, $3))::numeric, 1) AS distance_m FROM rescue_bags rb WHERE rb.id = $1`;
+      params.push(geoValidation.lat, geoValidation.lng);
+    }
+
+    const b = await queryOne(sql, params);
     if (!b) {
       return res.status(404).json({ error: 'Rescue bag not found' });
     }
-    res.json({
-      id: b.id,
-      merchantId: b.merchant_id,
-      merchantName: b.merchant_name,
-      merchantLogo: b.merchant_logo,
-      merchantRating: b.merchant_rating,
-      merchantAddress: b.merchant_address,
-      merchantLat: b.merchant_lat,
-      merchantLng: b.merchant_lng,
-      title: b.title,
-      titleKm: b.title_km,
-      title_en: b.title_en,
-      title_km: b.title_km,
-      description: b.description,
-      description_en: b.description_en,
-      description_km: b.description_km,
-      sourceLanguage: b.source_language,
-      translationStatus: b.translation_status,
-      isMachineTranslated: b.is_machine_translated,
-      category: b.category,
-      imageUrl: b.image_url,
-      originalPrice: parseFloat(b.original_price),
-      rescuePrice: parseFloat(b.rescue_price),
-      discountPercentage: b.discount_percentage,
-      quantityRemaining: b.quantity_remaining,
-      totalQuantity: b.total_quantity,
-      pickupStart: b.pickup_start,
-      pickupEnd: b.pickup_end,
-      allergens: b.allergens || [],
-      ingredients: b.ingredients || [],
-      storageInstructions: b.storage_instructions,
-      minItems: b.min_items,
-      maxItems: b.max_items,
-      visibility: b.visibility,
-      safetyConfirmed: b.safety_confirmed,
-      hasAutoEscalatingDiscount: b.has_auto_escalating_discount,
-      escalatedDiscountPercentage: b.escalated_discount_percentage,
-      escalateMinutesBeforeEnd: b.escalate_minutes_before_end,
-      createdAt: b.created_at,
-    });
+    res.json(formatRescueBag(b));
   } catch (err) {
+    console.error('Error fetching rescue bag:', err);
     res.status(500).json({ error: 'Failed to fetch rescue bag' });
   }
 });

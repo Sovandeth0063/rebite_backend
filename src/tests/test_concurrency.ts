@@ -8,6 +8,10 @@ async function testDirectConcurrency() {
   const check = await queryOne('SELECT id, quantity_remaining, visibility FROM rescue_bags WHERE id = $1', ['bag_bayon_1']);
   console.log('Initial bag state in Postgres:', check);
 
+  // Fetch valid user ID
+  const testUser = await queryOne<{ id: string }>('SELECT id FROM users LIMIT 1');
+  const validUserId = testUser ? testUser.id : 'usr_1';
+
   // 2. Define concurrent checkout worker using exact order.routes.ts logic
   async function placeOrderWorker(workerId: number) {
     const client = await pool.connect();
@@ -39,7 +43,7 @@ async function testDirectConcurrency() {
         [
           orderId,
           orderNum,
-          'usr_1788234689060',
+          validUserId,
           'Tester Customer',
           '+855 12 999 888',
           bag.merchant_id,
@@ -127,7 +131,7 @@ async function testDirectConcurrency() {
   await pool.query(
     `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
-    [newOrderId, 'RB-2026-999999', 'usr_1788234689060', 'Tester Customer', '+855 12 999 888', 'mer_bayon', 'Bayon Bakery', 'https://logo.test', 'Phnom Penh', 'bag_bayon_1', 'Test Bag', 1, 3.5, 3.5, 0.5, 4.0, '2026-09-01', '18:00 - 20:00', 'ABA_PAY', 'PAID', 'READY_FOR_PICKUP', 'https://qr.test', 'RB-999999-PICKUP', 'RB-9999', new Date().toISOString()]
+    [newOrderId, `RB-2026-${Math.floor(100000 + Math.random() * 900000)}`, validUserId, 'Tester Customer', '+855 12 999 888', 'mer_bayon', 'Bayon Bakery', 'https://logo.test', 'Phnom Penh', 'bag_bayon_1', 'Test Bag', 1, 3.5, 3.5, 0.5, 4.0, '2026-09-01', '18:00 - 20:00', 'ABA_PAY', 'PAID', 'READY_FOR_PICKUP', 'https://qr.test', 'RB-999999-PICKUP', 'RB-9999', new Date().toISOString()]
   );
 
   // Staff zeros out counter listing

@@ -141,27 +141,47 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
     consumedInWindow,
   } = req.body;
 
-  const user = req.currentUser || { id: 'usr_customer', name: 'Verified Customer', role: 'CUSTOMER' as const };
+  const user = req.currentUser;
   const reviewId = `rev_${Date.now()}`;
+
+  // 0. Strict Authentication Guard
+  if (!user || user.role === 'GUEST') {
+    return res.status(401).json({
+      error: 'Authentication required. Please log in to submit a review.',
+      code: 'UNAUTHORIZED',
+    });
+  }
+
+  // Explicit Role Guard: Merchants cannot submit reviews
+  if (user.role === 'MERCHANT') {
+    return res.status(403).json({
+      error: 'Merchants are not permitted to submit reviews on store orders.',
+      code: 'FORBIDDEN_MERCHANT_SELF_REVIEW',
+    });
+  }
 
   // 1. Mandatory Order ID Gating
   if (!orderId) {
-    return res.status(400).json({ error: 'Review must be tied to a verified Order ID.' });
+    return res.status(400).json({ error: 'Review must be tied to a verified Order ID.', code: 'INVALID_ORDER_ID' });
   }
 
   try {
-    // 2. Verified Purchase & Completion Check
-    const order = await queryOne<any>('SELECT * FROM orders WHERE id = $1', [orderId]);
+    // 2. Verified Purchase & Completion Check (Resolve canonical order by ID, order_number, or pickup_code)
+    const order = await queryOne<any>('SELECT * FROM orders WHERE id = $1 OR order_number = $1 OR pickup_code = $1', [orderId]);
     if (!order) {
-      return res.status(404).json({ error: 'Order not found.' });
+      return res.status(404).json({ error: 'Order not found.', code: 'ORDER_NOT_FOUND' });
     }
 
     if (order.order_status !== 'COMPLETED') {
-      return res.status(400).json({ error: 'Reviews are only permitted for completed, picked-up orders.' });
+      return res.status(400).json({ error: 'Reviews are only permitted for completed, picked-up orders.', code: 'ORDER_NOT_COMPLETED' });
     }
 
-    if (order.customer_id && user?.id && order.customer_id !== user.id && (user as any).role !== 'ADMIN' && order.customer_id !== 'usr_customer') {
-      return res.status(403).json({ error: 'You can only submit a review for your own order.' });
+    // Explicit Ownership Gating: Customer can only review their own order
+    if (order.customer_id && user.id && order.customer_id !== user.id && user.role !== 'ADMIN') {
+      return res.status(403).json({
+        error: 'You can only review orders that you personally placed.',
+        code: 'FORBIDDEN_NOT_ORDER_OWNER',
+      });
     }
 
     // 3. Review Window Check (14 days post-order)
@@ -169,14 +189,17 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
     const now = Date.now();
     const daysSinceOrder = (now - orderDate) / (1000 * 60 * 60 * 24);
     if (daysSinceOrder > 14) {
-      return res.status(400).json({ error: 'The 14-day review window for this order has expired.' });
+      return res.status(400).json({ error: 'The 14-day review window for this order has expired.', code: 'REVIEW_WINDOW_EXPIRED' });
     }
 
     // 4. Anti-Self-Farming Check (Merchant cannot rate own store)
     const effectiveMerchantId = merchantId || order.merchant_id;
     const merchant = await queryOne<any>('SELECT * FROM merchants WHERE id = $1', [effectiveMerchantId]);
     if (merchant && merchant.user_id === user.id) {
-      return res.status(403).json({ error: 'Merchants are not permitted to review their own store.' });
+      return res.status(403).json({
+        error: 'Merchants are not permitted to review their own store.',
+        code: 'FORBIDDEN_MERCHANT_SELF_REVIEW',
+      });
     }
 
     // 5. IP Conflict Risk Flag (Audit signal, not hard block)
@@ -207,8 +230,8 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
     const valueScore = valueRating ? Math.max(1, Math.min(5, parseInt(valueRating, 10))) : overallRating;
     const pickupScore = pickupExperienceRating ? Math.max(1, Math.min(5, parseInt(pickupExperienceRating, 10))) : overallRating;
 
-    // 8. Database Insert / Update (Idempotent per Order)
-    const existingReview = await queryOne('SELECT * FROM reviews WHERE order_id = $1', [orderId]);
+    // 8. Database Insert / Update (Idempotent per Order Primary Key)
+    const existingReview = await queryOne('SELECT * FROM reviews WHERE order_id = $1 OR order_id = $2', [order.id, order.order_number || order.id]);
     if (existingReview) {
       await pool.query(
         `UPDATE reviews 
@@ -216,7 +239,7 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
          WHERE id = $7`,
         [overallRating, sanitizedComment, foodScore, valueScore, pickupScore, consumedInWindow !== false, existingReview.id]
       );
-      await pool.query('UPDATE orders SET review_given = TRUE WHERE id = $1', [orderId]);
+      await pool.query('UPDATE orders SET review_given = TRUE WHERE id = $1', [order.id]);
       const updated = await queryOne('SELECT * FROM reviews WHERE id = $1', [existingReview.id]);
       return res.status(200).json(formatReview(updated));
     }
@@ -229,7 +252,7 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)`,
       [
         reviewId,
-        orderId,
+        order.id,
         effectiveMerchantId,
         user.id,
         user.name || 'Verified Customer',
@@ -246,8 +269,8 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
       ]
     );
 
-    // Mark order as reviewed
-    await pool.query('UPDATE orders SET review_given = TRUE WHERE id = $1', [orderId]);
+    // Mark order as reviewed strictly using canonical primary key id
+    await pool.query('UPDATE orders SET review_given = TRUE WHERE id = $1', [order.id]);
 
     // 9. TrueBayes Rating Recalculation (m = 10, Prior C = 4.8)
     const ratingStats = await queryOne<{ avg_rating: string; cnt: string }>(

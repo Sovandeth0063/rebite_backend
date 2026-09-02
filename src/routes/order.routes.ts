@@ -196,6 +196,13 @@ export const formatOrder = (o: any) => {
     pickupCode: o.pickup_code,
     collectedAt: o.collected_at,
     reviewGiven: o.review_given,
+    addons: (() => {
+      try {
+        if (!o.addons || o.addons === '[]' || o.addons === 'null') return [];
+        const parsed = Array.isArray(o.addons) ? o.addons : (typeof o.addons === 'string' ? JSON.parse(o.addons) : []);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch { return []; }
+    })(),
     createdAt: o.created_at,
   };
 };
@@ -232,7 +239,7 @@ orderRouter.get('/', async (req: AuthenticatedRequest, res) => {
       sql += ` AND order_status = $${params.length}`;
     }
 
-    sql += ' ORDER BY created_at DESC';
+    sql += " ORDER BY CASE WHEN order_status IN ('PAID', 'CONFIRMED', 'READY_FOR_PICKUP', 'RESERVED', 'PENDING') THEN 0 ELSE 1 END, created_at DESC";
     const rows = await query(sql, params);
     res.json(rows.map(formatOrder));
   } catch (err) {
@@ -256,7 +263,7 @@ orderRouter.get('/:id', async (req, res) => {
 
 // Create order
 orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
-  const { rescueBagId, quantity = 1, paymentMethod = 'ABA_PAY' } = req.body;
+  const { rescueBagId, quantity = 1, paymentMethod = 'ABA_PAY', addons: rawAddons = [] } = req.body;
 
   const client = await pool.connect();
   try {
@@ -309,12 +316,15 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
           merchant_address: r.merchant_address,
           title: r.title,
           rescue_price: r.rescue_price,
+          original_price: r.original_price,
+          image_url: r.image_url,
           pickup_start: r.pickup_start || '17:30',
           pickup_end: r.pickup_end || '20:30',
         };
       }
     }
 
+    // Primary bag failure — explicit rollback + 409
     if (!bag) {
       await client.query('ROLLBACK');
       return res.status(409).json({
@@ -322,8 +332,68 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       });
     }
 
+    // 2. Process add-on bags: dedup, self-selection guard, cross-merchant guard, atomic decrement
+    // Normalize: rawAddons can be an array of {id, quantity} objects or bare ids
+    const rawAddonList: Array<{ id: string; quantity?: number }> = Array.isArray(rawAddons)
+      ? rawAddons.map((a: any) => (typeof a === 'string' ? { id: a, quantity: 1 } : { id: a.id, quantity: a.quantity || 1 }))
+      : [];
+
+    // Dedup by id (server-side)
+    const seenIds = new Set<string>();
+    const deduplicatedAddons = rawAddonList.filter((a) => {
+      if (seenIds.has(a.id)) return false;
+      seenIds.add(a.id);
+      return true;
+    });
+
+    // Self-selection guard: addon cannot be the same as the primary bag
+    if (deduplicatedAddons.some((a) => a.id === rescueBagId)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Primary bag cannot be selected as an add-on.',
+      });
+    }
+
+    // For each addon: validate cross-merchant + decrement atomically
+    const addonSnapshots: Array<{ id: string; title: string; price: number; quantity: number; imageUrl?: string }> = [];
+    let addonSubtotal = 0;
+
+    for (const addon of deduplicatedAddons) {
+      const addonQty = Math.max(1, addon.quantity || 1);
+      const addonResult = await client.query(
+        `UPDATE rescue_bags
+         SET quantity_remaining = quantity_remaining - $1,
+             visibility = CASE WHEN quantity_remaining - $1 <= 0 THEN 'SOLD_OUT' ELSE visibility END
+         WHERE id = $2 AND merchant_id = $3 AND quantity_remaining >= $1
+         RETURNING *`,
+        [addonQty, addon.id, bag.merchant_id]
+      );
+
+      // Addon failure — rollback immediately, don't continue the loop
+      if (!addonResult.rowCount || !addonResult.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `Sorry, one of your selected add-ons (${addon.id}) is sold out, unavailable, or belongs to a different store.`,
+        });
+      }
+
+      const ar = addonResult.rows[0];
+      const addonPrice = parseFloat(ar.rescue_price);
+      addonSubtotal += addonPrice * addonQty;
+
+      // Immutable JSONB snapshot — captures price, title, imageUrl at purchase time
+      addonSnapshots.push({
+        id: ar.id,
+        title: ar.title,
+        price: addonPrice,
+        quantity: addonQty,
+        imageUrl: ar.image_url,
+      });
+    }
+
     const unitPrice = parseFloat(bag.rescue_price);
-    const subtotal = unitPrice * requestedQty;
+    const primarySubtotal = unitPrice * requestedQty;
+    const subtotal = primarySubtotal + addonSubtotal;
     const serviceFee = 0.5;
     const totalPrice = subtotal + serviceFee;
 
@@ -346,6 +416,14 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
     if (!user) {
       await client.query('ROLLBACK');
       return res.status(401).json({ error: 'User account required to place an order.' });
+    }
+
+    // Role Guard: Merchants are sellers, not buyers
+    if (user.role === 'MERCHANT') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: 'Merchant accounts cannot place customer orders. Please use a customer account to purchase surplus food.',
+      });
     }
 
     // Active Trust Score & Anti-Abuse Concurrency Gating for Cash Orders
@@ -373,8 +451,8 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
     }
 
     const insertedOrderRes = await client.query(
-      `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+      `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, addons, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
        RETURNING *`,
       [
         orderId,
@@ -401,6 +479,7 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
         qrUrl,
         qrData,
         pickupCode,
+        JSON.stringify(addonSnapshots),
         new Date().toISOString(),
       ]
     );
@@ -660,7 +739,7 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
 
     await client.query('UPDATE orders SET order_status = $1 WHERE id = $2', ['CANCELLED', order.id]);
 
-    // Restore bag inventory & restore visibility ONLY if bag is active (never revive archived/draft bags)
+    // Restore primary bag inventory & restore visibility ONLY if bag is active (never revive archived/draft bags)
     if (order.rescue_bag_id && order.quantity) {
       await client.query(
         `UPDATE rescue_bags
@@ -669,6 +748,28 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
          WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
         [order.quantity, order.rescue_bag_id]
       );
+    }
+
+    // Restore addon bag inventory for each add-on in the order snapshot
+    // (No-show path does NOT restore stock — food was set aside and perishable)
+    const orderAddons = (() => {
+      try {
+        return Array.isArray(order.addons)
+          ? order.addons
+          : (typeof order.addons === 'string' ? JSON.parse(order.addons) : []);
+      } catch { return []; }
+    })();
+
+    for (const addon of orderAddons) {
+      if (addon.id && addon.quantity) {
+        await client.query(
+          `UPDATE rescue_bags
+           SET quantity_remaining = quantity_remaining + $1,
+               visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
+           WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
+          [addon.quantity, addon.id]
+        ).catch(() => {});
+      }
     }
 
     // Revert user points

@@ -75,6 +75,8 @@ export interface Merchant {
   rejectionReason?: string;
   joinedDate: string;
   foodCategories: BusinessCategory[];
+  distance_m?: number;
+  distance?: number;
 }
 
 export type ListingVisibility = 'PUBLIC' | 'DRAFT' | 'SOLD_OUT' | 'ARCHIVED';
@@ -88,6 +90,8 @@ export interface RescueBag {
   merchantAddress: string;
   merchantLat: number;
   merchantLng: number;
+  distance_m?: number;
+  distance?: number;
   title: string;
   titleKm?: string;
   title_en?: string;
@@ -177,7 +181,16 @@ export interface Order {
   pickupCode: string;
   collectedAt?: string;
   reviewGiven?: boolean;
+  addons?: OrderAddonItem[];
   createdAt: string;
+}
+
+export interface OrderAddonItem {
+  id: string;
+  title: string;
+  price: number;
+  quantity: number;
+  imageUrl?: string;
 }
 
 export interface Review {
