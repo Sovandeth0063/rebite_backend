@@ -1,7 +1,9 @@
 import { pool, query, queryOne } from '../config/db.js';
+import { ensureDatabaseAndSchema } from '../db/createDb.js';
 
 async function testDirectConcurrency() {
   console.log('--- 🧪 DIRECT POSTGRESQL ATOMIC CONCURRENCY TEST ---');
+  await ensureDatabaseAndSchema();
 
   // 1. Reset bag stock to 1
   await pool.query('UPDATE rescue_bags SET quantity_remaining = 1, visibility = $1 WHERE id = $2', ['PUBLIC', 'bag_bayon_1']);

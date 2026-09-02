@@ -99,7 +99,7 @@ rescueBagRouter.get('/presets', async (req, res) => {
 
 // Get all rescue bags (with optional spatial distance calculation, radius filtering, and KNN proximity sorting)
 rescueBagRouter.get('/', async (req, res) => {
-  const { merchantId, category, maxPrice, search, availableOnly, lat, lng, radius, sortBy, limit, offset } = req.query;
+  const { merchantId, category, maxPrice, search, q, availableOnly, lat, lng, radius, sortBy, limit, offset } = req.query;
 
   // 1. Strict Geo Input Validation
   const geoValidation = validateGeoParams(lat, lng, radius);
@@ -161,13 +161,14 @@ rescueBagRouter.get('/', async (req, res) => {
     const rows = await query(sql, params);
     let bags = rows.map(formatRescueBag);
 
-    if (search) {
-      const q = (search as string).toLowerCase();
+    const term = (search || q) as string | undefined;
+    if (term) {
+      const qLower = term.toLowerCase();
       bags = bags.filter(
         (b) =>
-          b.title.toLowerCase().includes(q) ||
-          b.description.toLowerCase().includes(q) ||
-          b.merchantName.toLowerCase().includes(q)
+          b.title.toLowerCase().includes(qLower) ||
+          b.description.toLowerCase().includes(qLower) ||
+          b.merchantName.toLowerCase().includes(qLower)
       );
     }
 

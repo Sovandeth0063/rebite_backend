@@ -177,6 +177,7 @@ export const formatOrder = (o: any) => {
     rescueBagTitle: o.rescue_bag_title,
     quantity: o.quantity,
     unitPrice: parseFloat(o.unit_price),
+    originalUnitPrice: o.original_unit_price ? parseFloat(o.original_unit_price) : parseFloat(o.unit_price),
     subtotal,
     serviceFee,
     totalPrice,
@@ -239,7 +240,7 @@ orderRouter.get('/', async (req: AuthenticatedRequest, res) => {
       sql += ` AND order_status = $${params.length}`;
     }
 
-    sql += " ORDER BY CASE WHEN order_status IN ('PAID', 'CONFIRMED', 'READY_FOR_PICKUP', 'RESERVED', 'PENDING') THEN 0 ELSE 1 END, created_at DESC";
+    sql += " ORDER BY CASE WHEN order_status IN ('PAID', 'CONFIRMED', 'READY_FOR_PICKUP', 'RESERVED', 'PENDING') THEN 0 ELSE 1 END, COALESCE(collected_at, created_at) DESC";
     const rows = await query(sql, params);
     res.json(rows.map(formatOrder));
   } catch (err) {
@@ -263,7 +264,7 @@ orderRouter.get('/:id', async (req, res) => {
 
 // Create order
 orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
-  const { rescueBagId, quantity = 1, paymentMethod = 'ABA_PAY', addons: rawAddons = [] } = req.body;
+  const { rescueBagId, quantity = 1, paymentMethod = 'ABA_PAY', addons: rawAddons = [], promoCode } = req.body;
 
   const client = await pool.connect();
   try {
@@ -293,6 +294,7 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
           merchant_address: r.merchant_address,
           title: r.item_name,
           rescue_price: r.rescue_price,
+          original_price: r.original_price,
           pickup_start: r.pickup_start || '17:30',
           pickup_end: r.pickup_end || '20:30',
         };
@@ -332,21 +334,20 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       });
     }
 
-    // 2. Process add-on bags: dedup, self-selection guard, cross-merchant guard, atomic decrement
-    // Normalize: rawAddons can be an array of {id, quantity} objects or bare ids
+    // 2. Process add-on bags: dedup, self-selection guard, cross-merchant guard, atomic decrement (ordered by ID for deadlock prevention)
     const rawAddonList: Array<{ id: string; quantity?: number }> = Array.isArray(rawAddons)
       ? rawAddons.map((a: any) => (typeof a === 'string' ? { id: a, quantity: 1 } : { id: a.id, quantity: a.quantity || 1 }))
       : [];
 
-    // Dedup by id (server-side)
     const seenIds = new Set<string>();
-    const deduplicatedAddons = rawAddonList.filter((a) => {
-      if (seenIds.has(a.id)) return false;
-      seenIds.add(a.id);
-      return true;
-    });
+    const deduplicatedAddons = rawAddonList
+      .filter((a) => {
+        if (seenIds.has(a.id)) return false;
+        seenIds.add(a.id);
+        return true;
+      })
+      .sort((a, b) => a.id.localeCompare(b.id)); // Strict ID ordering to prevent concurrent add-on deadlocks
 
-    // Self-selection guard: addon cannot be the same as the primary bag
     if (deduplicatedAddons.some((a) => a.id === rescueBagId)) {
       await client.query('ROLLBACK');
       return res.status(400).json({
@@ -354,7 +355,6 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       });
     }
 
-    // For each addon: validate cross-merchant + decrement atomically
     const addonSnapshots: Array<{ id: string; title: string; price: number; quantity: number; imageUrl?: string }> = [];
     let addonSubtotal = 0;
 
@@ -369,7 +369,6 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
         [addonQty, addon.id, bag.merchant_id]
       );
 
-      // Addon failure — rollback immediately, don't continue the loop
       if (!addonResult.rowCount || !addonResult.rows[0]) {
         await client.query('ROLLBACK');
         return res.status(409).json({
@@ -381,7 +380,6 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       const addonPrice = parseFloat(ar.rescue_price);
       addonSubtotal += addonPrice * addonQty;
 
-      // Immutable JSONB snapshot — captures price, title, imageUrl at purchase time
       addonSnapshots.push({
         id: ar.id,
         title: ar.title,
@@ -392,16 +390,10 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
     }
 
     const unitPrice = parseFloat(bag.rescue_price);
+    const originalUnitPrice = parseFloat(bag.original_price || bag.base_price || bag.rescue_price || '0');
     const primarySubtotal = unitPrice * requestedQty;
     const subtotal = primarySubtotal + addonSubtotal;
     const serviceFee = 0.5;
-    const totalPrice = subtotal + serviceFee;
-
-    const orderNum = `RB-2026-${Math.floor(100000 + Math.random() * 900000)}`;
-    const orderId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const pickupCode = `RB-${Math.floor(1000 + Math.random() * 9000)}`;
-    const qrData = `${orderNum}-PICKUP`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
 
     let user = req.currentUser;
     if (!user) {
@@ -418,13 +410,124 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       return res.status(401).json({ error: 'User account required to place an order.' });
     }
 
-    // Role Guard: Merchants are sellers, not buyers
     if (user.role === 'MERCHANT') {
       await client.query('ROLLBACK');
       return res.status(403).json({
         error: 'Merchant accounts cannot place customer orders. Please use a customer account to purchase surplus food.',
       });
     }
+
+    // 3. Voucher Verification inside Transaction (Step 3 in Lock Hierarchy — Bags then Voucher)
+    let discountAmount = 0;
+    let appliedVoucherCode: string | null = null;
+    let customerVoucherIdToUpdate: string | null = null;
+    let isGlobalVoucher = false;
+
+    if (promoCode && typeof promoCode === 'string' && promoCode.trim()) {
+      const normCode = promoCode.trim().toUpperCase();
+
+      // Check customer personal voucher first
+      const custVoucherRes = await client.query(
+        `SELECT * FROM customer_vouchers 
+         WHERE UPPER(voucher_code) = $1 AND customer_id = $2 
+         FOR UPDATE`,
+        [normCode, user.id]
+      );
+      const custVoucher = custVoucherRes.rows[0];
+
+      if (custVoucher) {
+        if (custVoucher.status === 'USED') {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `Voucher "${normCode}" has already been used on order #${custVoucher.order_id || 'RB'}.`,
+          });
+        }
+
+        const expiryTime = new Date(custVoucher.expires_at).getTime();
+        if (custVoucher.status === 'EXPIRED' || expiryTime <= Date.now()) {
+          await client.query('ROLLBACK');
+          const expiredDateStr = new Date(custVoucher.expires_at).toLocaleDateString();
+          return res.status(400).json({
+            error: `Voucher "${normCode}" expired on ${expiredDateStr} and is no longer valid.`,
+          });
+        }
+
+        const minReq = parseFloat(custVoucher.min_order_amount) || 0;
+        if (subtotal < minReq) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `Order subtotal ($${subtotal.toFixed(2)}) does not meet minimum requirement ($${minReq.toFixed(2)}) for voucher "${normCode}".`,
+          });
+        }
+
+        discountAmount = parseFloat(custVoucher.discount_amount);
+        appliedVoucherCode = custVoucher.voucher_code;
+        customerVoucherIdToUpdate = custVoucher.id;
+      } else {
+        // Fallback to Global Campaign Vouchers
+        const voucherRes = await client.query(
+          'SELECT * FROM vouchers WHERE UPPER(code) = $1 FOR UPDATE',
+          [normCode]
+        );
+        const voucher = voucherRes.rows[0];
+
+        if (!voucher) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Voucher code "${normCode}" does not exist.` });
+        }
+
+        if (!voucher.is_active) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Voucher "${normCode}" is no longer active.` });
+        }
+
+        if (voucher.expires_at && new Date(voucher.expires_at).getTime() <= Date.now()) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Voucher "${normCode}" has expired.` });
+        }
+
+        const minReq = parseFloat(voucher.min_order_amount) || 0;
+        if (subtotal < minReq) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `Order subtotal ($${subtotal.toFixed(2)}) does not meet minimum requirement ($${minReq.toFixed(2)}) for voucher "${normCode}".`,
+          });
+        }
+
+        if (voucher.total_usage_limit && (voucher.used_count || 0) >= voucher.total_usage_limit) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `Voucher campaign "${normCode}" has reached maximum global capacity.`,
+          });
+        }
+
+        const redemptionsRes = await client.query(
+          'SELECT COUNT(*) as count FROM voucher_redemptions WHERE voucher_code = $1 AND customer_id = $2',
+          [voucher.code, user.id]
+        );
+        const userUses = parseInt(redemptionsRes.rows[0]?.count || '0', 10);
+        const maxAllowed = voucher.max_uses_per_customer || 1;
+
+        if (userUses >= maxAllowed) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({
+            error: `You have already redeemed voucher "${normCode}" (limit: ${maxAllowed} use per customer).`,
+          });
+        }
+
+        discountAmount = parseFloat(voucher.discount_amount);
+        appliedVoucherCode = voucher.code;
+        isGlobalVoucher = true;
+      }
+    }
+
+    const totalPrice = Math.max(0, subtotal + serviceFee - discountAmount);
+
+    const orderNum = `RB-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const orderId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const pickupCode = `RB-${Math.floor(1000 + Math.random() * 9000)}`;
+    const qrData = `${orderNum}-PICKUP`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
 
     // Active Trust Score & Anti-Abuse Concurrency Gating for Cash Orders
     if (paymentMethod === 'CASH_AT_PICKUP') {
@@ -441,7 +544,6 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       const rawTrust = user.trustScore !== undefined ? user.trustScore : ((user as any).trust_score !== undefined ? (user as any).trust_score : 75);
       const trustScore = Math.min(100, Math.max(0, rawTrust));
 
-      // Rule 1: Absolute Cash Lock (Only when 3 active strikes or trustScore < 50)
       if (activeStrikes >= 3 || trustScore < 50) {
         await client.query('ROLLBACK');
         return res.status(403).json({
@@ -451,8 +553,8 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
     }
 
     const insertedOrderRes = await client.query(
-      `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, addons, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+      `INSERT INTO orders (id, order_number, customer_id, customer_name, customer_phone, merchant_id, merchant_name, merchant_logo, merchant_address, rescue_bag_id, rescue_bag_title, quantity, unit_price, original_unit_price, subtotal, service_fee, total_price, pickup_date, pickup_window, payment_method, payment_status, order_status, qr_code_url, qr_code_data, pickup_code, addons, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
        RETURNING *`,
       [
         orderId,
@@ -468,6 +570,7 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
         bag.title,
         requestedQty,
         unitPrice,
+        originalUnitPrice,
         subtotal,
         serviceFee,
         totalPrice,
@@ -484,6 +587,30 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       ]
     );
 
+    // Update customer voucher state atomically
+    if (customerVoucherIdToUpdate) {
+      await client.query(
+        `UPDATE customer_vouchers 
+         SET status = 'USED', used_at = CURRENT_TIMESTAMP, order_id = $1 
+         WHERE id = $2`,
+        [orderId, customerVoucherIdToUpdate]
+      );
+    }
+
+    // Record global voucher redemption if applied
+    if (isGlobalVoucher && appliedVoucherCode) {
+      const redemptionId = `vouch_red_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      await client.query(
+        'UPDATE vouchers SET used_count = used_count + 1 WHERE code = $1',
+        [appliedVoucherCode]
+      );
+      await client.query(
+        `INSERT INTO voucher_redemptions (id, voucher_code, customer_id, order_id, discount_applied, redeemed_at)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+        [redemptionId, appliedVoucherCode, user.id, orderId, discountAmount]
+      );
+    }
+
     // Commit primary order creation & inventory lock immediately
     await client.query('COMMIT');
     console.log('[DEBUG POST /orders] Successfully committed order:', insertedOrderRes.rows[0]?.order_number);
@@ -492,16 +619,15 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
 
     // Secondary async updates outside transaction
     try {
-      const origP = parseFloat(bag.original_price) || 5.0;
-      const rescP = parseFloat(bag.rescue_price) || 2.5;
-      const savingsPerMeal = Math.max(0, origP - rescP);
+      const origP = originalUnitPrice || (unitPrice * 1.5);
+      const savingsPerMeal = Math.max(0, origP - unitPrice);
 
       await pool.query(
         `UPDATE impact_stats
-         SET meals_rescued = meals_rescued + $1,
-             food_saved_kg = food_saved_kg + ($1 * 0.75),
-             customer_savings_usd = customer_savings_usd + ($1 * $2),
-             co2_avoided_kg = co2_avoided_kg + ($1 * 1.8)
+         SET meals_rescued = meals_rescued + $1::integer,
+             food_saved_kg = food_saved_kg + ($1::numeric * 0.75),
+             customer_savings_usd = customer_savings_usd + ($1::numeric * $2::numeric),
+             co2_avoided_kg = co2_avoided_kg + ($1::numeric * 1.8)
          WHERE id = (SELECT id FROM impact_stats LIMIT 1)`,
         [requestedQty, savingsPerMeal]
       );
@@ -527,8 +653,8 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// Update order status
-orderRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
+// Update order status (PUT & PATCH)
+const handleUpdateOrderStatus = async (req: AuthenticatedRequest, res: any) => {
   const { status, restockBag } = req.body;
   try {
     const order = await queryOne('SELECT * FROM orders WHERE id = $1', [req.params.id]);
@@ -571,7 +697,10 @@ orderRouter.put('/:id/status', async (req: AuthenticatedRequest, res) => {
     console.error('Error updating order status:', err);
     res.status(500).json({ error: 'Failed to update order status' });
   }
-});
+};
+
+orderRouter.put('/:id/status', handleUpdateOrderStatus);
+orderRouter.patch('/:id/status', handleUpdateOrderStatus);
 
 // Global Scan QR / Pickup code verification endpoint
 orderRouter.post('/scan-qr', async (req, res) => {
@@ -604,25 +733,8 @@ orderRouter.post('/scan-qr', async (req, res) => {
       return res.json({
         success: true,
         message: 'Order was already marked completed.',
-        order: {
-          id: order.id,
-          orderNumber: order.order_number,
-          customerId: order.customer_id,
-          customerName: order.customer_name,
-          customerPhone: order.customer_phone,
-          merchantId: order.merchant_id,
-          merchantName: order.merchant_name,
-          rescueBagId: order.rescue_bag_id,
-          rescueBagTitle: order.rescue_bag_title,
-          quantity: order.quantity,
-          unitPrice: parseFloat(order.unit_price),
-          subtotal: parseFloat(order.subtotal),
-          totalPrice: parseFloat(order.total_price),
-          orderStatus: 'COMPLETED',
-          collectedAt: order.collected_at,
-          createdAt: order.created_at,
-        },
-        pointsEarned: order.quantity * 10,
+        order: formatOrder(order),
+        pointsEarned: (order.quantity || 1) * 10,
       });
     }
 
@@ -688,24 +800,7 @@ orderRouter.post('/scan-qr', async (req, res) => {
     res.json({
       success: true,
       message: 'Pickup confirmed! Order completed successfully.',
-      order: {
-        id: updated.id,
-        orderNumber: updated.order_number,
-        customerId: updated.customer_id,
-        customerName: updated.customer_name,
-        customerPhone: updated.customer_phone,
-        merchantId: updated.merchant_id,
-        merchantName: updated.merchant_name,
-        rescueBagId: updated.rescue_bag_id,
-        rescueBagTitle: updated.rescue_bag_title,
-        quantity: updated.quantity,
-        unitPrice: parseFloat(updated.unit_price),
-        subtotal: parseFloat(updated.subtotal),
-        totalPrice: parseFloat(updated.total_price),
-        orderStatus: updated.order_status,
-        collectedAt: updated.collected_at,
-        createdAt: updated.created_at,
-      },
+      order: formatOrder(updated || order),
       pointsEarned,
     });
   } catch (err: any) {
@@ -740,14 +835,27 @@ orderRouter.post('/:id/cancel', async (req: AuthenticatedRequest, res) => {
     await client.query('UPDATE orders SET order_status = $1 WHERE id = $2', ['CANCELLED', order.id]);
 
     // Restore primary bag inventory & restore visibility ONLY if bag is active (never revive archived/draft bags)
+    // Supports both Live Drop listings and standard Mystery Bags
     if (order.rescue_bag_id && order.quantity) {
-      await client.query(
-        `UPDATE rescue_bags
-         SET quantity_remaining = quantity_remaining + $1,
-             visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
-         WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
-        [order.quantity, order.rescue_bag_id]
-      );
+      const isLiveListing = typeof order.rescue_bag_id === 'string' && order.rescue_bag_id.startsWith('live_');
+      if (isLiveListing) {
+        await client.query(
+          `UPDATE live_listings
+           SET quantity_left = quantity_left + $1,
+               status = CASE WHEN status = 'SOLD_OUT' AND expires_at > NOW() THEN 'LIVE' ELSE status END,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND status != 'EXPIRED'`,
+          [order.quantity, order.rescue_bag_id]
+        );
+      } else {
+        await client.query(
+          `UPDATE rescue_bags
+           SET quantity_remaining = quantity_remaining + $1,
+               visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
+           WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
+          [order.quantity, order.rescue_bag_id]
+        );
+      }
     }
 
     // Restore addon bag inventory for each add-on in the order snapshot
@@ -909,16 +1017,7 @@ orderRouter.post('/:id/no-show', async (req: AuthenticatedRequest, res) => {
 
     const order = updateRes.rows[0];
 
-    // Restock bag inventory if applicable
-    if (order.rescue_bag_id && order.quantity) {
-      await client.query(
-        `UPDATE rescue_bags
-         SET quantity_remaining = quantity_remaining + $1,
-             visibility = CASE WHEN visibility = 'SOLD_OUT' THEN 'PUBLIC' ELSE visibility END
-         WHERE id = $2 AND visibility != 'ARCHIVED' AND visibility != 'DRAFT'`,
-        [order.quantity, order.rescue_bag_id]
-      ).catch(() => {});
-    }
+    // Food Safety Policy: Perishable food is set aside and prepared; stock is NOT restored on NO-SHOW.
 
     // Penalize user: -25 trust score, +1.0 strike, reset consecutive clean pickups to 0
     if (order.customer_id) {

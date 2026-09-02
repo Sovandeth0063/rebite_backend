@@ -43,8 +43,8 @@ async function runTests() {
     assert(menuItems.length >= 5, `Seeded active menu items exist (found ${menuItems.length})`);
 
     // Setup Isolated Test Fixtures
-    const merchant = await queryOne('SELECT * FROM merchants WHERE id = $1', ['mer_labrioche']);
-    assert(!!merchant, 'Test merchant "mer_labrioche" exists');
+    const merchant = await queryOne('SELECT * FROM merchants WHERE id = $1', ['mer_bayon']);
+    assert(!!merchant, 'Test merchant "mer_bayon" exists');
 
     // Clean any prior test artifacts
     await pool.query("DELETE FROM live_listings WHERE id LIKE 'test_live_%'");
@@ -54,9 +54,9 @@ async function runTests() {
     await pool.query(
       `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active)
        VALUES 
-        ('test_item_croissant', 'mer_labrioche', 'Test Butter Croissant', 'ក្រូសង់', 'Bakery', 2.50, 'http://img', true),
-        ('test_item_restock', 'mer_labrioche', 'Test Baguette Restock', 'បាហ្គែត', 'Bakery', 1.80, 'http://img', true),
-        ('test_item_collision', 'mer_labrioche', 'Test Eclair Collision', 'អេក្លែរ', 'Bakery', 3.00, 'http://img', true)
+        ('test_item_croissant', 'mer_bayon', 'Test Butter Croissant', 'ក្រូសង់', 'Bakery', 2.50, 'http://img', true),
+        ('test_item_restock', 'mer_bayon', 'Test Baguette Restock', 'បាហ្គែត', 'Bakery', 1.80, 'http://img', true),
+        ('test_item_collision', 'mer_bayon', 'Test Eclair Collision', 'អេក្លែរ', 'Bakery', 3.00, 'http://img', true)
        ON CONFLICT (id) DO NOTHING`
     );
 
@@ -68,8 +68,8 @@ async function runTests() {
           id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
           item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
         ) VALUES (
-          'test_live_invalid', 'mer_labrioche', 'test_item_croissant', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
-          'Croissant', 3, 30, 1.75, 2.50, NOW() + INTERVAL '2 hours', 'LIVE'
+          'test_live_invalid', 'mer_bayon', 'test_item_croissant', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
+          'Test Croissant', 5, 20, 2.00, 2.50, NOW() + INTERVAL '2 hours', 'LIVE'
         )`
       );
       assert(false, 'DB constraint should reject discount_pct < 40');
@@ -84,7 +84,7 @@ async function runTests() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
       ) VALUES (
-        'test_live_1', 'mer_labrioche', 'test_item_croissant', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
+        'test_live_1', 'mer_bayon', 'test_item_croissant', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Test Butter Croissant', 4, 50, 1.25, 2.50, NOW() + INTERVAL '2 hours', 'LIVE'
       )`
     );
@@ -100,7 +100,7 @@ async function runTests() {
           id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
           item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
         ) VALUES (
-          'test_live_duplicate', 'mer_labrioche', 'test_item_croissant', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
+          'test_live_duplicate', 'mer_bayon', 'test_item_croissant', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
           'Test Butter Croissant Dupe', 2, 50, 1.25, 2.50, NOW() + INTERVAL '2 hours', 'LIVE'
         )`
       );
@@ -116,7 +116,7 @@ async function runTests() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
       ) VALUES (
-        'test_live_restock_1', 'mer_labrioche', 'test_item_restock', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
+        'test_live_restock_1', 'mer_bayon', 'test_item_restock', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Test Baguette Restock', 0, 50, 0.90, 1.80, NOW() + INTERVAL '2 hours', 'SOLD_OUT'
       )`
     );
@@ -151,7 +151,7 @@ async function runTests() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
       ) VALUES (
-        'test_live_collision_A', 'mer_labrioche', 'test_item_collision', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
+        'test_live_collision_A', 'mer_bayon', 'test_item_collision', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Test Eclair A', 0, 50, 1.50, 3.00, NOW() + INTERVAL '2 hours', 'SOLD_OUT'
       )`
     );
@@ -161,7 +161,7 @@ async function runTests() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
       ) VALUES (
-        'test_live_collision_B', 'mer_labrioche', 'test_item_collision', 'La Brioche', 'logo.png', 11.5, 104.9, 'Riverside',
+        'test_live_collision_B', 'mer_bayon', 'test_item_collision', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Test Eclair B', 3, 50, 1.50, 3.00, NOW() + INTERVAL '2 hours', 'LIVE'
       )`
     );
@@ -207,7 +207,7 @@ async function runTests() {
     // TEST 7: Soft Delete Menu Item
     console.log('\n--- Test 7: Soft-delete on Menu Items ---');
     await pool.query("UPDATE menu_items SET is_active = FALSE WHERE id = 'test_item_croissant'");
-    const activeItems = await query("SELECT * FROM menu_items WHERE merchant_id = 'mer_labrioche' AND is_active = TRUE");
+    const activeItems = await query("SELECT * FROM menu_items WHERE merchant_id = 'mer_bayon' AND is_active = TRUE");
     const foundDeleted = activeItems.some((i) => i.id === 'test_item_croissant');
     assert(!foundDeleted, 'Soft-deleted item excluded from active menu query (WHERE is_active = TRUE)');
 

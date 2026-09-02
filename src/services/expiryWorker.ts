@@ -16,6 +16,7 @@ export function startExpiryWorker() {
 
   const checkExpired = async () => {
     try {
+      // 1. Sweep expired live surplus drops
       const res = await pool.query(
         `UPDATE live_listings
          SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
@@ -25,6 +26,18 @@ export function startExpiryWorker() {
 
       if (res.rowCount && res.rowCount > 0) {
         console.log(`[ExpiryWorker] Auto-expired ${res.rowCount} listings that passed their pickup window.`);
+      }
+
+      // 2. Sweep expired customer perk vouchers
+      const vouchRes = await pool.query(
+        `UPDATE customer_vouchers
+         SET status = 'EXPIRED'
+         WHERE status = 'ACTIVE' AND expires_at <= CURRENT_TIMESTAMP
+         RETURNING id, voucher_code, customer_id`
+      );
+
+      if (vouchRes.rowCount && vouchRes.rowCount > 0) {
+        console.log(`[ExpiryWorker] Auto-expired ${vouchRes.rowCount} customer vouchers that passed their validity window.`);
       }
     } catch (err: any) {
       console.warn('[ExpiryWorker] Error during expiry check cycle:', err.message);

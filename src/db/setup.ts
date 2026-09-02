@@ -88,6 +88,9 @@ export async function setupDatabase(forceRecreate: boolean = false) {
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS is_suspicious_ip BOOLEAN DEFAULT FALSE;
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS moderation_status VARCHAR(50) DEFAULT 'APPROVED';
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN DEFAULT FALSE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS is_flagged BOOLEAN DEFAULT FALSE;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS flag_reason TEXT;
+    ALTER TABLE reviews ADD COLUMN IF NOT EXISTS flagger_id VARCHAR(100);
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS merchant_reply TEXT;
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS merchant_replied_at TIMESTAMP WITH TIME ZONE;
     ALTER TABLE reviews ADD COLUMN IF NOT EXISTS food_quality_rating INTEGER;
@@ -96,6 +99,78 @@ export async function setupDatabase(forceRecreate: boolean = false) {
 
     ALTER TABLE orders ADD COLUMN IF NOT EXISTS addons JSONB DEFAULT '[]'::jsonb;
     UPDATE orders SET addons = '[]'::jsonb WHERE addons IS NULL;
+    ALTER TABLE orders ADD COLUMN IF NOT EXISTS original_unit_price NUMERIC(10, 2);
+
+    -- Vouchers Tables
+    CREATE TABLE IF NOT EXISTS vouchers (
+      code VARCHAR(50) PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      discount_amount NUMERIC(10, 2) NOT NULL CHECK (discount_amount >= 0),
+      discount_type VARCHAR(20) DEFAULT 'FIXED' CHECK (discount_type IN ('FIXED', 'PERCENTAGE')),
+      min_order_amount NUMERIC(10, 2) DEFAULT 0 CHECK (min_order_amount >= 0),
+      max_uses_per_customer INTEGER DEFAULT 1,
+      total_usage_limit INTEGER,
+      used_count INTEGER DEFAULT 0 CHECK (used_count >= 0),
+      is_active BOOLEAN DEFAULT TRUE,
+      expires_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS voucher_redemptions (
+      id VARCHAR(100) PRIMARY KEY,
+      voucher_code VARCHAR(50) NOT NULL REFERENCES vouchers(code) ON DELETE CASCADE,
+      customer_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      order_id VARCHAR(100) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      discount_applied NUMERIC(10, 2) NOT NULL,
+      redeemed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(voucher_code, customer_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS customer_vouchers (
+      id VARCHAR(100) PRIMARY KEY,
+      customer_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      voucher_code VARCHAR(50) UNIQUE NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      discount_amount NUMERIC(10, 2) NOT NULL CHECK (discount_amount > 0),
+      min_order_amount NUMERIC(10, 2) DEFAULT 0 CHECK (min_order_amount >= 0),
+      points_spent INTEGER DEFAULT 0 CHECK (points_spent >= 0),
+      status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'USED', 'EXPIRED')),
+      idempotency_key VARCHAR(100),
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      used_at TIMESTAMP WITH TIME ZONE,
+      order_id VARCHAR(100) REFERENCES orders(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_customer_vouchers_lookup 
+    ON customer_vouchers (customer_id, status, expires_at);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_vouchers_idempotency 
+    ON customer_vouchers (customer_id, idempotency_key) 
+    WHERE idempotency_key IS NOT NULL;
+
+    -- Dual-Table Backfill Migration: Populate original_unit_price for both rescue_bags and live_listings orders
+    UPDATE orders o
+    SET original_unit_price = rb.original_price
+    FROM rescue_bags rb
+    WHERE o.rescue_bag_id = rb.id AND o.original_unit_price IS NULL;
+
+    UPDATE orders o
+    SET original_unit_price = ll.original_price
+    FROM live_listings ll
+    WHERE (o.rescue_bag_id = ll.id OR o.rescue_bag_id = ('live_' || ll.id) OR o.rescue_bag_id = REPLACE(ll.id, 'live_', ''))
+      AND o.original_unit_price IS NULL;
+
+    -- Seed standard active promotion vouchers
+    INSERT INTO vouchers (code, title, discount_amount, discount_type, min_order_amount, max_uses_per_customer, total_usage_limit, is_active)
+    VALUES
+      ('RESCUEBITE50', '$1.50 Off Food Rescue Special', 1.50, 'FIXED', 3.00, 1, 1000, TRUE),
+      ('WELCOME10', '$1.00 Welcome Rescuer Promo', 1.00, 'FIXED', 0.00, 1, 5000, TRUE),
+      ('ECOHERO', '$2.00 Eco Hero Sustainability Discount', 2.00, 'FIXED', 5.00, 1, 500, TRUE)
+    ON CONFLICT (code) DO NOTHING;
+
+    ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
+    ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS unit VARCHAR(50) DEFAULT 'piece';
 
     -- Spatial Extensions & GIST indexes
     CREATE EXTENSION IF NOT EXISTS cube;

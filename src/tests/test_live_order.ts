@@ -1,9 +1,14 @@
 import { pool } from '../config/db.js';
+import { ensureDatabaseAndSchema } from '../db/createDb.js';
 
 async function main() {
+  await ensureDatabaseAndSchema();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const userRow = await client.query('SELECT id FROM users LIMIT 1');
+    const validUserId = userRow.rows[0]?.id || 'usr_customer';
+
     const res = await client.query(`
       INSERT INTO orders (
         id, order_number, customer_id, customer_name, customer_phone,
@@ -13,7 +18,7 @@ async function main() {
         payment_method, payment_status, order_status, qr_code_url,
         qr_code_data, pickup_code, created_at
       ) VALUES (
-        'ord_live_test_1', 'RB-2026-LIVE01', 'usr_1788229813203', 'Sovandath Hour',
+        'ord_live_test_1', 'RB-2026-LIVE01', $1, 'Sovandath Hour',
         '+855 12 345 678', 'mer_bayon', 'Bayon Bakery', 'https://logo.png',
         'St 282, BKK1, Phnom Penh', 'bag_bayon_1', 'Bayon Fresh Bread',
         1, 3.50, 3.50, 0.50, 4.00, '2026-09-02', '18:00 - 20:00',
@@ -21,7 +26,7 @@ async function main() {
         'RB-2026-LIVE01-PICKUP', 'RB-7777', NOW()
       ) ON CONFLICT (id) DO UPDATE SET order_status = 'READY_FOR_PICKUP'
       RETURNING *
-    `);
+    `, [validUserId]);
     await client.query('COMMIT');
     console.log('Successfully committed order:', res.rows[0].order_number);
   } finally {

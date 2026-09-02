@@ -111,6 +111,7 @@ import { settingsRouter } from './routes/settings.routes.js';
 import { bakongRouter } from './routes/bakong.routes.js';
 import { menuItemRouter } from './routes/menuItem.routes.js';
 import { liveListingRouter } from './routes/liveListing.routes.js';
+import { voucherRouter } from './routes/voucher.routes.js';
 import { startExpiryWorker } from './services/expiryWorker.js';
 import { AuthenticatedRequest } from './middleware/auth.js';
 
@@ -121,6 +122,7 @@ app.use('/api/rescue-bags', rescueBagRouter);
 app.use('/api/menu-items', menuItemRouter);
 app.use('/api/live-listings', liveListingRouter);
 app.use('/api/orders', orderRouter);
+app.use('/api/vouchers', voucherRouter);
 app.use('/api/reviews', reviewRouter);
 app.use('/api/impact', impactRouter);
 app.use('/api/ai', aiRouter);

@@ -20,6 +20,37 @@ import { AuthenticatedRequest, recordAuditLog } from '../middleware/auth.js';
 
 export const authRouter = Router();
 
+export function formatAuthUser(user: any) {
+  if (!user) return null;
+  let savedStoreIds: string[] = [];
+  try {
+    if (user.saved_store_ids) {
+      savedStoreIds = Array.isArray(user.saved_store_ids)
+        ? user.saved_store_ids
+        : typeof user.saved_store_ids === 'string'
+        ? JSON.parse(user.saved_store_ids)
+        : [];
+    }
+  } catch {
+    savedStoreIds = [];
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    phone: user.phone || '',
+    avatarUrl: user.avatar_url || '',
+    language: user.language || 'en',
+    points: user.points || 0,
+    referralCode: user.referral_code,
+    referredBy: user.referred_by,
+    savedStoreIds,
+    createdAt: user.created_at,
+  };
+}
+
 // Login
 authRouter.post('/login', async (req: AuthenticatedRequest, res) => {
   const { email, password } = req.body;
@@ -91,20 +122,7 @@ authRouter.post('/login', async (req: AuthenticatedRequest, res) => {
 
     res.json({
       token: `jwt_demo_${user.id}`,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        phone: user.phone || '',
-        avatarUrl: user.avatar_url || '',
-        language: user.language || 'en',
-        points: user.points || 0,
-        referralCode: user.referral_code,
-        referredBy: user.referred_by,
-        savedStoreIds: user.saved_store_ids || [],
-        createdAt: user.created_at,
-      },
+      user: formatAuthUser(user),
     });
   } catch (err: any) {
     console.error('Login error:', err);
@@ -207,20 +225,7 @@ authRouter.post('/register', async (req, res) => {
 
     res.json({
       token: `jwt_demo_${newUser.id}`,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role,
-        phone: newUser.phone || '',
-        avatarUrl: '',
-        language: newUser.language,
-        points: newUser.points,
-        referralCode: newUser.referral_code,
-        referredBy: newUser.referred_by,
-        savedStoreIds: [],
-        createdAt: newUser.created_at,
-      },
+      user: formatAuthUser(newUser),
     });
   } catch (err: any) {
     console.error('Registration error:', err);
@@ -243,7 +248,7 @@ authRouter.get('/me', async (req: AuthenticatedRequest, res) => {
   res.json(req.currentUser);
 });
 
-authRouter.put('/profile', async (req: AuthenticatedRequest, res) => {
+const handleUpdateProfile = async (req: AuthenticatedRequest, res: any) => {
   if (!req.currentUser) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -269,25 +274,15 @@ authRouter.put('/profile', async (req: AuthenticatedRequest, res) => {
     );
 
     const updated = await queryOne('SELECT * FROM users WHERE id = $1', [req.currentUser.id]);
-    res.json({
-      id: updated.id,
-      email: updated.email,
-      name: updated.name,
-      role: updated.role,
-      phone: updated.phone,
-      avatarUrl: updated.avatar_url,
-      language: updated.language,
-      points: updated.points,
-      referralCode: updated.referral_code,
-      referredBy: updated.referred_by,
-      savedStoreIds: updated.saved_store_ids || [],
-      createdAt: updated.created_at,
-    });
+    res.json(formatAuthUser(updated));
   } catch (err: any) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Failed to update profile' });
   }
-});
+};
+
+authRouter.put('/profile', handleUpdateProfile);
+authRouter.patch('/profile', handleUpdateProfile);
 
 // Customer Settings
 authRouter.get('/profile/settings', async (req: AuthenticatedRequest, res) => {

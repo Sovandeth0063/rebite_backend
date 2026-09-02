@@ -201,7 +201,71 @@ liveListingRouter.post('/', async (req: AuthenticatedRequest, res) => {
       });
     }
     console.error('Error creating live listing:', err);
-    res.status(500).json({ error: 'Failed to create live listing' });
+  }
+});
+
+// Update live listing fields (Pickup hours, discount, quantity)
+liveListingRouter.patch('/:id', async (req: AuthenticatedRequest, res) => {
+  const { pickupStart, pickupEnd, quantityLeft, discountPct } = req.body;
+
+  try {
+    const existing = await queryOne('SELECT * FROM live_listings WHERE id = $1', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    // Ownership check
+    if (req.currentUser && req.currentUser.role === 'MERCHANT') {
+      const merchant = await queryOne('SELECT id FROM merchants WHERE user_id = $1', [req.currentUser.id]);
+      if (merchant && merchant.id !== existing.merchant_id) {
+        return res.status(403).json({ error: 'Forbidden: you do not own this listing' });
+      }
+    }
+
+    let updatedExpiresAt = existing.expires_at;
+    const finalPickupEnd = pickupEnd || existing.pickup_end;
+    if (pickupEnd) {
+      const today = new Date();
+      const [h, m] = finalPickupEnd.split(':').map((s: string) => parseInt(s, 10) || 0);
+      const expDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h || 20, m || 0, 0);
+      if (expDate.getTime() <= Date.now()) {
+        expDate.setTime(Date.now() + 2 * 60 * 60 * 1000);
+      }
+      updatedExpiresAt = expDate.toISOString();
+    }
+
+    const finalQty = quantityLeft !== undefined ? parseInt(quantityLeft, 10) : existing.quantity_left;
+    const finalDiscount = discountPct !== undefined ? parseFloat(discountPct) : parseFloat(existing.discount_pct);
+    const origPrice = parseFloat(existing.original_price);
+    const finalRescuePrice = (origPrice * (1 - finalDiscount / 100)).toFixed(2);
+
+    const result = await pool.query(
+      `UPDATE live_listings
+       SET pickup_start = COALESCE($1, pickup_start),
+           pickup_end = COALESCE($2, pickup_end),
+           expires_at = COALESCE($3, expires_at),
+           quantity_left = $4,
+           discount_pct = $5,
+           rescue_price = $6,
+           status = CASE WHEN $4 <= 0 THEN 'SOLD_OUT' ELSE 'LIVE' END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $7
+       RETURNING *`,
+      [
+        pickupStart || null,
+        pickupEnd || null,
+        updatedExpiresAt,
+        finalQty,
+        finalDiscount,
+        finalRescuePrice,
+        req.params.id,
+      ]
+    );
+
+    res.json(formatLiveListing(result.rows[0]));
+  } catch (err: any) {
+    console.error('Error updating live listing:', err);
+    res.status(500).json({ error: 'Failed to update live listing' });
   }
 });
 

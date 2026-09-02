@@ -1,9 +1,11 @@
 import assert from 'assert';
 import { query } from '../config/db.js';
 import { validateGeoParams } from '../utils/geo.js';
+import { ensureDatabaseAndSchema } from '../db/createDb.js';
 
 async function runTests() {
   console.log('--- 🧪 SPATIAL & POSTGRESQL DISTANCE TESTS ---');
+  await ensureDatabaseAndSchema();
 
   // 1. Test Input Validation
   console.log('1. Testing Geo Input Validation...');

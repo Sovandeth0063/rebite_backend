@@ -20,6 +20,9 @@ const ALLOWED_TABLES = [
   'users',
   'merchants',
   'rescue_bags',
+  'menu_items',
+  'live_listings',
+  'category_presets',
   'orders',
   'reviews',
   'impact_stats',
@@ -34,6 +37,15 @@ const ALLOWED_TABLES = [
   'admin_users',
   'login_sessions',
 ];
+
+// Admin Authorization Guard: Database Studio is an internal administration tool
+crudRouter.use((req: AuthenticatedRequest, res, next) => {
+  // Allow ADMIN role or authenticated developer session
+  if (!req.currentUser || req.currentUser.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Forbidden: Admin authorization required for Database Studio' });
+  }
+  next();
+});
 
 function sanitizeTableName(name: string): string {
   const clean = name.toLowerCase().trim();

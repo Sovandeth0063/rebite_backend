@@ -124,7 +124,7 @@ async function runLiveDropsWorkflowTestSuite() {
     // Create test menu item
     await pool.query(
       `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active)
-       VALUES ('unit_item_croissant', 'mer_ausbake', 'Artisan Butter Croissant', 'ក្រូសង់ប៊័រ', 'Bakery', 2.80, 'http://img', true)
+       VALUES ('unit_item_croissant', 'mer_bayon', 'Artisan Butter Croissant', 'ក្រូសង់ប៊័រ', 'Bakery', 2.80, 'http://img', true)
        ON CONFLICT (id) DO NOTHING`
     );
 
@@ -135,7 +135,7 @@ async function runLiveDropsWorkflowTestSuite() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, item_name_km, quantity_left, discount_pct, rescue_price, original_price, pickup_start, pickup_end, expires_at, status
       ) VALUES (
-        'unit_test_drop_1', 'mer_ausbake', 'unit_item_croissant', 'AusBake Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
+        'unit_test_drop_1', 'mer_bayon', 'unit_item_croissant', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Artisan Butter Croissant', 'ក្រូសង់ប៊័រ', 4, 50, 1.40, 2.80, '18:00', '20:00', $1, 'LIVE'
       )`,
       [expiresAt]
@@ -205,7 +205,7 @@ async function runLiveDropsWorkflowTestSuite() {
     // Create a dedicated menu item for expiry testing
     await pool.query(
       `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active)
-       VALUES ('unit_item_baguette', 'mer_ausbake', 'Artisan Baguette', 'បាហ្គែត', 'Bakery', 2.00, 'http://img', true)
+       VALUES ('unit_item_baguette', 'mer_bayon', 'Artisan Baguette', 'បាហ្គែត', 'Bakery', 2.00, 'http://img', true)
        ON CONFLICT (id) DO NOTHING`
     );
 
@@ -216,7 +216,7 @@ async function runLiveDropsWorkflowTestSuite() {
         id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address,
         item_name, quantity_left, discount_pct, rescue_price, original_price, expires_at, status
       ) VALUES (
-        'unit_test_drop_expired', 'mer_ausbake', 'unit_item_baguette', 'AusBake Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
+        'unit_test_drop_expired', 'mer_bayon', 'unit_item_baguette', 'Bayon Bakery', 'logo.png', 11.55, 104.92, 'Street 240',
         'Expired Baguette Drop', 2, 50, 1.00, 2.00, $1, 'LIVE'
       ) ON CONFLICT (id) DO NOTHING`,
       [pastExpiryTime]

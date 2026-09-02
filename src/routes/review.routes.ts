@@ -314,7 +314,7 @@ reviewRouter.post('/', async (req: AuthenticatedRequest, res) => {
 
 // 3. POST /api/reviews/:id/reply - Merchant Public Response
 reviewRouter.post('/:id/reply', async (req: AuthenticatedRequest, res) => {
-  const { replyText } = req.body;
+  const replyText = req.body.replyText || req.body.reply || req.body.merchantReply;
   const user = req.currentUser;
 
   if (!user) {
@@ -337,11 +337,6 @@ reviewRouter.post('/:id/reply', async (req: AuthenticatedRequest, res) => {
       if (!merchant || merchant.user_id !== user.id) {
         return res.status(403).json({ error: 'Only the store owner can reply to this review.' });
       }
-    }
-
-    // Single-reply limit
-    if (review.merchant_reply) {
-      return res.status(400).json({ error: 'A merchant reply has already been published for this review.' });
     }
 
     const sanitizedReply = sanitizeText(replyText);

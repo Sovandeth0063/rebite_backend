@@ -66,7 +66,7 @@ settingsRouter.get('/customer', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-settingsRouter.patch('/customer', async (req: AuthenticatedRequest, res) => {
+const handleUpdateCustomerSettings = async (req: AuthenticatedRequest, res: any) => {
   const userId = req.currentUser?.id || 'usr_customer';
   try {
     await pool.query(
@@ -79,7 +79,10 @@ settingsRouter.patch('/customer', async (req: AuthenticatedRequest, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to save customer settings' });
   }
-});
+};
+
+settingsRouter.patch('/customer', handleUpdateCustomerSettings);
+settingsRouter.put('/customer', handleUpdateCustomerSettings);
 
 settingsRouter.post('/customer/password', async (req: AuthenticatedRequest, res) => {
   const { currentPassword, newPassword } = req.body;
@@ -147,11 +150,28 @@ settingsRouter.post('/customer/delete-account', async (req: AuthenticatedRequest
   });
 });
 
+// Helper to resolve merchant store strictly from authentication or explicit param
+async function resolveMerchantId(req: AuthenticatedRequest, explicitId?: string): Promise<string | null> {
+  if (explicitId && explicitId.trim()) {
+    const merchant = await queryOne('SELECT id FROM merchants WHERE id = $1', [explicitId.trim()]);
+    if (merchant) return merchant.id;
+  }
+  if (req.currentUser?.id) {
+    const merchant = await queryOne('SELECT id FROM merchants WHERE user_id = $1', [req.currentUser.id]);
+    if (merchant) return merchant.id;
+  }
+  return null;
+}
+
 // ----------------------------------------------------------------------------
 // 3. Merchant Settings & Store Staff Endpoints
 // ----------------------------------------------------------------------------
 settingsRouter.get('/merchant', async (req: AuthenticatedRequest, res) => {
-  const merchantId = req.query.merchantId as string || 'mer_1';
+  const merchantId = await resolveMerchantId(req, req.query.merchantId as string);
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   try {
     const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
     if (row && row.settings) {
@@ -198,8 +218,12 @@ settingsRouter.get('/merchant', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-settingsRouter.patch('/merchant', async (req: AuthenticatedRequest, res) => {
-  const merchantId = req.body.merchantId || req.query.merchantId || 'mer_1';
+const handleUpdateMerchantSettings = async (req: AuthenticatedRequest, res: any) => {
+  const merchantId = await resolveMerchantId(req, req.body.merchantId || (req.query.merchantId as string));
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   try {
     await pool.query(
       `INSERT INTO merchant_settings (merchant_id, user_id, settings)
@@ -211,10 +235,17 @@ settingsRouter.patch('/merchant', async (req: AuthenticatedRequest, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed to update merchant settings' });
   }
-});
+};
 
-settingsRouter.patch('/merchant/payout', async (req: AuthenticatedRequest, res) => {
-  const merchantId = req.query.merchantId as string || 'mer_1';
+settingsRouter.patch('/merchant', handleUpdateMerchantSettings);
+settingsRouter.put('/merchant', handleUpdateMerchantSettings);
+
+const handleUpdateMerchantPayout = async (req: AuthenticatedRequest, res: any) => {
+  const merchantId = await resolveMerchantId(req, req.query.merchantId as string);
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   try {
     const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
     const current = row?.settings || {};
@@ -230,10 +261,38 @@ settingsRouter.patch('/merchant/payout', async (req: AuthenticatedRequest, res) 
   } catch (err) {
     res.status(500).json({ error: 'Failed to update payout settings' });
   }
+};
+
+settingsRouter.get('/merchant/payout', async (req: AuthenticatedRequest, res) => {
+  const merchantId = await resolveMerchantId(req, req.query.merchantId as string);
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
+  try {
+    const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
+    const payout = row?.settings?.payout || {
+      bankName: 'ABA Bank Cambodia',
+      accountNumber: '001 889 234',
+      accountName: 'PARTNER BAKERY CO LTD',
+      payoutSchedule: 'DAILY',
+      lastUpdated: new Date().toISOString(),
+    };
+    res.json(payout);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch payout settings' });
+  }
 });
 
+settingsRouter.patch('/merchant/payout', handleUpdateMerchantPayout);
+settingsRouter.put('/merchant/payout', handleUpdateMerchantPayout);
+
 settingsRouter.get('/merchant/team', async (req: AuthenticatedRequest, res) => {
-  const merchantId = req.query.merchantId as string || 'mer_1';
+  const merchantId = await resolveMerchantId(req, req.query.merchantId as string);
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   try {
     const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
     const team = row?.settings?.teamMembers || [
@@ -244,6 +303,13 @@ settingsRouter.get('/merchant/team', async (req: AuthenticatedRequest, res) => {
         role: 'STORE_MANAGER',
         addedAt: '2026-01-10',
       },
+      {
+        id: 'tm_2',
+        name: 'Vannak Kem',
+        email: 'kem.counter@bakery.com',
+        role: 'STORE_STAFF',
+        addedAt: '2026-02-01',
+      },
     ];
     res.json(team);
   } catch (err) {
@@ -253,7 +319,11 @@ settingsRouter.get('/merchant/team', async (req: AuthenticatedRequest, res) => {
 
 settingsRouter.post('/merchant/team', async (req: AuthenticatedRequest, res) => {
   const { name, email, role } = req.body;
-  const merchantId = req.query.merchantId as string || 'mer_1';
+  const merchantId = await resolveMerchantId(req, req.body.merchantId || (req.query.merchantId as string));
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   const newMember = {
     id: `tm_${Date.now()}`,
     name,
@@ -264,9 +334,10 @@ settingsRouter.post('/merchant/team', async (req: AuthenticatedRequest, res) => 
 
   try {
     const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
-    const current = row?.settings || { teamMembers: [] };
-    if (!current.teamMembers) current.teamMembers = [];
-    current.teamMembers.push(newMember);
+    const current = row?.settings || {};
+    const team = current.teamMembers || [];
+    team.push(newMember);
+    current.teamMembers = team;
 
     await pool.query(
       `INSERT INTO merchant_settings (merchant_id, user_id, settings)
@@ -281,19 +352,22 @@ settingsRouter.post('/merchant/team', async (req: AuthenticatedRequest, res) => 
 });
 
 settingsRouter.delete('/merchant/team/:id', async (req: AuthenticatedRequest, res) => {
-  const merchantId = req.query.merchantId as string || 'mer_1';
+  const merchantId = await resolveMerchantId(req, req.query.merchantId as string);
+  if (!merchantId) {
+    return res.status(400).json({ error: 'Merchant store context required' });
+  }
+
   try {
     const row = await queryOne('SELECT settings FROM merchant_settings WHERE merchant_id = $1', [merchantId]);
-    const current = row?.settings || { teamMembers: [] };
-    if (current.teamMembers) {
-      current.teamMembers = current.teamMembers.filter((m: any) => m.id !== req.params.id);
-      await pool.query(
-        `INSERT INTO merchant_settings (merchant_id, user_id, settings)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (merchant_id) DO UPDATE SET settings = EXCLUDED.settings`,
-        [merchantId, req.currentUser?.id || 'usr_merchant', JSON.stringify(current)]
-      );
-    }
+    const current = row?.settings || {};
+    current.teamMembers = (current.teamMembers || []).filter((m: any) => m.id !== req.params.id);
+
+    await pool.query(
+      `INSERT INTO merchant_settings (merchant_id, user_id, settings)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (merchant_id) DO UPDATE SET settings = EXCLUDED.settings`,
+      [merchantId, req.currentUser?.id || 'usr_merchant', JSON.stringify(current)]
+    );
     res.json({ success: true, message: 'Team member removed' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to remove team member' });
@@ -325,7 +399,7 @@ settingsRouter.get('/admin/platform', async (req, res) => {
   }
 });
 
-settingsRouter.patch('/admin/platform', async (req: AuthenticatedRequest, res) => {
+const handleUpdatePlatformConfig = async (req: AuthenticatedRequest, res: any) => {
   try {
     await pool.query(
       `INSERT INTO platform_config (id, config)
@@ -338,7 +412,10 @@ settingsRouter.patch('/admin/platform', async (req: AuthenticatedRequest, res) =
   } catch (err) {
     res.status(500).json({ error: 'Failed to update platform config' });
   }
-});
+};
+
+settingsRouter.patch('/admin/platform', handleUpdatePlatformConfig);
+settingsRouter.put('/admin/platform', handleUpdatePlatformConfig);
 
 settingsRouter.get('/admin/users', async (req, res) => {
   try {

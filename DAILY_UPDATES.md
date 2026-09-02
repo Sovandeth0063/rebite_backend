@@ -20,16 +20,49 @@
 
 ---
 
-### 2. 🏪 Merchant Order Queue & Customer Review Inspection
-- **Newest-First Chronological Ordering:**
-  - Re-ordered store orders queue strictly by `createdAt DESC` so newly placed reservations appear on top immediately.
-- **Customer Review Inspection Dialog:**
-  - Integrated **"Inspect Review (X.X★)"** trigger on completed orders.
-  - Modal provides deep inspection: multi-dimensional scores (Food Quality, Value for Money, Pickup Experience), 2-hour consumption safety badge, customer commentary, and inline public store reply editor.
+### 2. 🎟️ Time-Limited Voucher Engine, DB Idempotency & Rewards Lifecycle
+- **Server-Authoritative Expiration & Idempotency:**
+  - Designed `customer_vouchers` table with DB-enforced `expires_at`, `status IN ('ACTIVE','USED','EXPIRED')`, and unique constraint `idx_customer_vouchers_idempotency` preventing double points deduction on concurrent requests.
+  - Integrated `FOR UPDATE` transaction locks during checkout to atomically mark vouchers as `USED` and safely rollback to `ACTIVE` if the order creation aborts.
+- **Points Wallet & Catalog Badge Count Fix:**
+  - Fixed tab badge in `RewardsView.tsx` to accurately reflect available redemption perks (`3`) rather than user wallet instances.
+  - Integrated full 7-step unit & integration test suite (`test_voucher_lifecycles.ts`) validating 100% passing results.
 
 ---
 
-### 3. 📊 Dedicated Merchant Executive Dashboard (`MerchantDashboardView.tsx`)
+### 3. ⚡ Merchant Live Handover & Real-Time Counter Sync
+- **Optimistic State Updates:**
+  - Connected `onCompleteOrder` across `App.tsx` and `MerchantView.tsx` so clicking **"Verify & Handover"** immediately transitions order state to `COMPLETED` without requiring manual page reloads.
+  - Synchronized automatic status updates with backend `scanQrCode` verification endpoint.
+
+---
+
+### 4. ⏰ Adjustable Pickup Hours for Fast Drops & Active Listings
+- **Backend Pickup Hours Endpoint:**
+  - Implemented `PATCH /api/live-listings/:id` supporting live updates to `pickupStart`, `pickupEnd`, and quantity with automated server-side recalculation of `expires_at`.
+- **Merchant Controls:**
+  - Added start/end time pickers (`<input type="time" />`) with 4 quick 1-tap presets (`17:00–19:00`, `17:30–20:00`, `18:00–20:00`, `18:30–21:00`) in the Quick Drop card.
+  - Added an inline **"Adjust Hours"** editor on active listings for instant schedule corrections.
+
+---
+
+### 5. ✏️ Product Edit Action in Merchant Menu Catalogue & Fast Drops
+- **Catalog Management:**
+  - Added **"Edit"** (`✏️ Edit`) action button in the Master Menu Catalogue desktop table, mobile card stream, and Fast Drops grid.
+  - Unified modal form dynamically pre-filling English & Khmer names, category, base price, batch quantity, unit, and product image.
+  - Saving updates backend `PATCH /api/menu-items/:id` and synchronizes all active live listings in real-time.
+
+---
+
+### 6. 🔍 Real-Time Order & Pickup Queue Filter Bar
+- **Tabbed Order Filtering:**
+  - Added 5 responsive filter pill buttons: **All Orders**, **Ready for Pickup** (Pending), **Completed** (Handover Verified), **Cancelled / Voided**, and **No Review Yet**.
+  - Dynamic badge counters compute exact filter stats in real-time via `useMemo`.
+  - Contextual empty states for each filter view.
+
+---
+
+### 7. 📊 Dedicated Merchant Executive Dashboard (`MerchantDashboardView.tsx`)
 - **Standalone Executive View:**
   - Decoupled high-level analytics from daily operations into a dedicated **Store Dashboard** view in the top navigation bar.
 - **Financial Recovery Ledger & Payout Settlement:**
@@ -43,25 +76,13 @@
 
 ---
 
-### 4. ⚡ Streamlined 3-Tab Operational Hub (`MerchantView.tsx`)
-- **Removed Cluttered Nested Sub-tabs:**
-  - Completely removed the old `Store Insights` and `Store Profile` tabs from the daily operations flow.
-- **Clean 3-Tab Focus:**
-  1. `⚡ Daily Rescue Hub`: Fast single-item drops & mystery surprise bag creation.
-  2. `📋 Menu Catalog`: Item catalog, batch pricing, and custom photos.
-  3. `📦 Orders & Pickups`: Live queue, review inspection, and QR verification scanner.
-
----
-
-### 5. 📱 iPhone & Mobile Responsiveness Overhaul
+### 8. 📱 Mobile & iPhone Responsiveness Overhaul
 - **iOS-Style Segmented Navigation Bar:**
   - 3-column compact segmented bar with adaptive labels (`⚡ Rescue`, `📋 Menu`, `📦 Orders`) fitting 375px/390px iPhone viewports without wrapping.
 - **Touch-Friendly Action Grids:**
   - `Surprise Bag` and `Scan QR` buttons scale to full-width 2-column touch targets on mobile.
 - **Responsive Mobile Item Cards for Menu Catalog:**
   - Render crisp data table on desktop/tablet (`hidden md:block`) and native touch cards on iPhone (`md:hidden`) with thumbnail, batch info, and 1-tap action buttons.
-- **Auto-Scaled Typography on KPI Cards:**
-  - Scaled number metrics (`text-lg sm:text-2xl md:text-3xl font-black`) avoiding truncation on compact smartphone screens.
 
 ---
 
@@ -80,13 +101,16 @@
 
 | Repository | File | Description |
 |---|---|---|
-| **Frontend** | `ReBite/src/components/MerchantDashboardView.tsx` | **[NEW]** Dedicated Executive Dashboard (Financial Ledger, Impact KPIs, AI Forecasting, Reviews) |
-| **Frontend** | `ReBite/src/components/MerchantView.tsx` | Streamlined 3 operational tabs, latest-first order sort, review inspection modal, mobile responsive cards |
+| **Frontend** | `ReBite/src/components/MerchantView.tsx` | Added product Edit action, pickup hours customizer, order queue filter tabs (All, Pending, Completed, Cancelled, No Review), and realtime handover sync |
+| **Frontend** | `ReBite/src/components/RewardsView.tsx` | Fixed rewards catalog tab badge count, points history connected to user wallet |
+| **Frontend** | `ReBite/src/components/CheckoutView.tsx` | Added voucher discount calculation, time-limited expiry validation display |
+| **Frontend** | `ReBite/src/services/api.ts` | Added `updateLiveListing`, `updateMenuItem`, `getMyVouchers`, and voucher validation APIs |
+| **Frontend** | `ReBite/src/App.tsx` | Wired `onCompleteOrder` into `MerchantView` for live reactive state updates |
+| **Frontend** | `ReBite/src/components/MerchantDashboardView.tsx` | Executive Dashboard with Financial Ledger, Impact KPIs, AI Forecasting |
 | **Frontend** | `ReBite/src/components/Header.tsx` | Added `Store Dashboard` navigation in desktop navbar & mobile drawer |
-| **Frontend** | `ReBite/src/App.tsx` | Routed `merchant_dashboard` view, merchant bottom navigation bar |
-| **Frontend** | `ReBite/src/components/OrdersView.tsx` | Scoped merchant filtering, symmetric 3-slot actions for cancelled orders |
-| **Frontend** | `ReBite/src/components/CheckoutView.tsx` | Add-on selection, atomic cash-at-counter total calculation |
-| **Backend** | `backend/src/routes/order.routes.ts` | Single-connection atomic transaction, add-on concurrency protection (`409`), cross-merchant validation |
-| **Backend** | `backend/src/routes/review.routes.ts` | Public merchant reply endpoint and multidimensional ratings support |
-| **Backend** | `backend/src/routes/merchant.routes.ts` | Profile and location updates handler |
-| **Root** | `DAILY_UPDATES.md` | Comprehensive system progress and operational update report |
+| **Backend** | `backend/src/routes/liveListing.routes.ts` | Added `PATCH /api/live-listings/:id` for pickup window and stock quantity updates |
+| **Backend** | `backend/src/routes/voucher.routes.ts` | Added time-limited voucher issuance, validation, and points redemption endpoints |
+| **Backend** | `backend/src/routes/order.routes.ts` | Single-connection atomic transaction, voucher FOR UPDATE locking and rollback safety |
+| **Backend** | `backend/src/tests/test_live_drop_workflow.ts` | 17-step end-to-end live listing lifecycle test suite |
+| **Backend** | `backend/src/tests/test_voucher_lifecycles.ts` | 7-step voucher time-limited expiration and idempotency test suite |
+| **Root** | `DAILY_UPDATES.md` | Comprehensive system progress and daily operational report |

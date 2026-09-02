@@ -65,7 +65,12 @@ menuItemRouter.post('/', async (req: AuthenticatedRequest, res) => {
       if (m) merchantId = m.id;
     }
     if (!merchantId) {
-      merchantId = 'mer_labrioche';
+      return res.status(400).json({ error: 'merchantId is required or store profile must be established' });
+    }
+
+    const merchant = await queryOne('SELECT id FROM merchants WHERE id = $1', [merchantId]);
+    if (!merchant) {
+      return res.status(404).json({ error: 'Merchant store not found' });
     }
 
     const basePrice = parseFloat(data.basePrice);
@@ -117,8 +122,8 @@ menuItemRouter.post('/', async (req: AuthenticatedRequest, res) => {
   }
 });
 
-// 3. PATCH /api/menu-items/:id - Update catalogue item with ownership check
-menuItemRouter.patch('/:id', async (req: AuthenticatedRequest, res) => {
+// 3. PATCH & PUT /api/menu-items/:id - Update catalogue item with ownership check
+const handleUpdateMenuItem = async (req: AuthenticatedRequest, res: any) => {
   const data = req.body;
 
   try {
@@ -186,7 +191,10 @@ menuItemRouter.patch('/:id', async (req: AuthenticatedRequest, res) => {
     console.error('Error updating menu item:', err);
     res.status(500).json({ error: 'Failed to update menu item' });
   }
-});
+};
+
+menuItemRouter.patch('/:id', handleUpdateMenuItem);
+menuItemRouter.put('/:id', handleUpdateMenuItem);
 
 // 4. DELETE /api/menu-items/:id - Soft-delete menu item with ownership check
 menuItemRouter.delete('/:id', async (req: AuthenticatedRequest, res) => {

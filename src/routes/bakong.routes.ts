@@ -16,6 +16,10 @@
 
 import { Router } from 'express';
 import crypto from 'crypto';
+// @ts-ignore
+import { BakongKHQR, IndividualInfo, MerchantInfo, khqrData } from 'bakong-khqr';
+
+const bakongSdk = new BakongKHQR();
 
 export const bakongRouter = Router();
 
@@ -23,18 +27,34 @@ export const bakongRouter = Router();
 // 1. BAKONG NBC OPEN API CONFIGURATION & PLACEHOLDERS
 // (Set these in your .env for live banking network transactions)
 // ============================================================================
-const BAKONG_CONFIG = {
-  // NBC Open API Token (obtain from https://bakong.nbc.gov.kh/developer/)
-  apiToken: process.env.BAKONG_API_TOKEN || '',
-  // Live API Base URL (default: https://api-bakong.nbc.gov.kh/v1)
-  apiUrl: process.env.BAKONG_API_URL || 'https://api-bakong.nbc.gov.kh/v1',
-  // Official Registered Merchant Account ID (e.g. 'rescuebite_platform@aba')
-  merchantId: process.env.BAKONG_MERCHANT_ID || 'rescuebite@aba',
-  merchantName: process.env.BAKONG_MERCHANT_NAME || 'RescueBite Cambodia',
-  merchantCity: process.env.BAKONG_MERCHANT_CITY || 'Phnom Penh',
-  acquiringBank: process.env.BAKONG_ACQUIRING_BANK || 'ABA Bank',
-  currencyCode: '840', // USD: 840, KHR: 116
-};
+import dotenv from 'dotenv';
+
+// Dynamic configuration reader supporting both standard formats with instant hot-reload
+function getBakongConfig() {
+  dotenv.config({ override: true });
+  const apiUrl = (process.env.KHQR_BASE_URL || process.env.BAKONG_API_URL || 'https://api-bakong.nbc.gov.kh').replace(/\/+$/, '');
+  const finalApiUrl = apiUrl.endsWith('/v1') ? apiUrl : `${apiUrl}/v1`;
+
+  const bakongAccountId =
+    process.env.KHQR_BAKONG_ACCOUNT_ID ||
+    process.env.BAKONG_MERCHANT_ID ||
+    process.env.BAKONG_ACCOUNT_ID ||
+    process.env.KHQR_EMAIL ||
+    'rescuebite@aba';
+
+  return {
+    apiToken: process.env.BAKONG_API_TOKEN || process.env.KHQR_API_TOKEN || '',
+    apiUrl: finalApiUrl,
+    email: process.env.KHQR_EMAIL || process.env.BAKONG_EMAIL || '',
+    merchantId: bakongAccountId,
+    merchantName: process.env.KHQR_MERCHANT_NAME || process.env.BAKONG_MERCHANT_NAME || process.env.KHQR_APP_NAME || 'RescueBite Cambodia',
+    merchantCity: process.env.KHQR_MERCHANT_CITY || process.env.BAKONG_MERCHANT_CITY || 'Phnom Penh',
+    acquiringBank: process.env.BAKONG_ACQUIRING_BANK || 'ABA Bank',
+    appIconUrl: process.env.KHQR_APP_ICON_URL || '',
+    appDeeplinkCallback: process.env.KHQR_APP_DEEPLINK_CALLBACK || '',
+    currencyCode: '840', // USD: 840, KHR: 116
+  };
+}
 
 /**
  * Standard EMVCo CRC-16 CCITT-FALSE Algorithm
@@ -57,40 +77,35 @@ export function calculateCrc16(payload: string): string {
 }
 
 /**
-/**
  * Truncates a UTF-8 string to a maximum byte limit safely without splitting multi-byte characters.
  */
 export function safeUtf8ByteTruncate(str: string, maxBytes: number): string {
   const buf = Buffer.from(str, 'utf8');
   if (buf.length <= maxBytes) return str;
   let sliceEnd = maxBytes;
-  // Step backward if we landed in the middle of a multi-byte UTF-8 sequence (continuation byte starts with 10xxxxxx)
   while (sliceEnd > 0 && (buf[sliceEnd] & 0xc0) === 0x80) {
     sliceEnd--;
   }
   return buf.subarray(0, sliceEnd).toString('utf8');
 }
 
-/**
- * Helper to build EMVCo Tag-Length-Value (TLV) string with strict UTF-8 byte length
- */
 function toTlv(tag: string, value: string): string {
   const byteLength = Buffer.byteLength(value, 'utf8');
   const lengthStr = byteLength.toString().padStart(2, '0');
   return `${tag}${lengthStr}${value}`;
 }
 
-/**
- * Sanitizes merchant name for EMVCo Tag 59 (max 25 ASCII characters fallback)
- */
 function sanitizeAscii(str: string, maxLen: number = 25): string {
   const clean = str.replace(/[^\x20-\x7E]/g, '').trim();
   return (clean.length > 0 ? clean : 'RescueBite Store').substring(0, maxLen);
 }
 
+function detectKhmerScript(text: string): boolean {
+  return /[\u1780-\u17FF]/.test(text);
+}
+
 /**
- * Builds standard-compliant NBC Dynamic KHQR payload
- * Supports Tag 64 (Merchant Information - Language Template) for native Khmer script
+ * Builds standard-compliant NBC Dynamic KHQR payload using authentic ABA & NBC EMVCo encoding
  */
 export function buildEmvcoKhqr(options: {
   amountUsd: number;
@@ -101,69 +116,110 @@ export function buildEmvcoKhqr(options: {
   merchantCity?: string;
   merchantCityKm?: string;
 }): { qrCodeData: string; md5Hash: string } {
+  const cfg = getBakongConfig();
   const {
     amountUsd,
     orderNumber,
-    merchantId = BAKONG_CONFIG.merchantId,
-    merchantName = BAKONG_CONFIG.merchantName,
+    merchantId = cfg.merchantId,
+    merchantName = cfg.merchantName,
     merchantNameKm,
-    merchantCity = BAKONG_CONFIG.merchantCity,
-    merchantCityKm = 'ភ្នំពេញ',
+    merchantCity = cfg.merchantCity,
+    merchantCityKm,
   } = options;
 
-  const formattedAmount = amountUsd.toFixed(2);
+  const numAmount = Math.max(0.01, parseFloat(amountUsd.toFixed(2)));
+  const formattedAmount = numAmount.toFixed(2);
+  const safeOrderNumber = orderNumber.replace(/[^\x20-\x7E]/g, '').substring(0, 25);
   const safeMerchantName = sanitizeAscii(merchantName, 25);
   const safeMerchantCity = sanitizeAscii(merchantCity, 15);
-  const safeOrderNumber = orderNumber.replace(/[^\x20-\x7E]/g, '').substring(0, 25);
 
-  // Sub-tag for Bakong Merchant Account Information (Tag 29 or Tag 30)
-  // Tag 00: Globally Unique Identifier ("bakongkh")
-  // Tag 01: Merchant Account ID / Bakong Phone
+  // Build Tag 64: EMVCo Merchant Information - Language Template (Native Khmer Script)
+  let tag64 = '';
+  const nativeName = merchantNameKm || (detectKhmerScript(merchantName) ? merchantName : '');
+  if (nativeName) {
+    const safeNativeName = safeUtf8ByteTruncate(nativeName, 50);
+    const safeNativeCity = safeUtf8ByteTruncate(merchantCityKm || 'ភ្នំពេញ', 30);
+    tag64 = toTlv('64', toTlv('00', 'km') + toTlv('01', safeNativeName) + toTlv('02', safeNativeCity));
+  }
+
+  // If receiving account is ABA Bank, use ABA's native P2P & EMVCo tag sequence
+  if (merchantId.includes('aba') || merchantId.includes('007462933')) {
+    const cleanAccount = merchantId.replace(/[^0-9]/g, '') || '007462933';
+    
+    // Tag 29: ABA Bakong Account
+    const tag29 = toTlv('00', 'abaakhppxxx@abaa') + toTlv('01', cleanAccount) + toTlv('02', 'ABA Bank');
+    
+    // Tag 40: ABA P2P Dual Account Routing (KHR 007463048, USD 007462933)
+    const tag40 = toTlv('00', 'abaP2P') + toTlv('01', '87EF4817F604') + toTlv('02', '007463048') + toTlv('03', cleanAccount) + toTlv('04', 'Dual');
+
+    let rawPayload =
+      toTlv('00', '01') +
+      toTlv('01', '12') +
+      toTlv('29', tag29) +
+      toTlv('40', tag40) +
+      toTlv('52', '0000') +
+      toTlv('53', '840') +
+      toTlv('54', formattedAmount) +
+      toTlv('58', 'KH') +
+      toTlv('59', safeMerchantName) +
+      toTlv('60', safeMerchantCity) +
+      toTlv('62', toTlv('01', safeOrderNumber)) +
+      tag64 +
+      '6304';
+
+    const crc = calculateCrc16(rawPayload);
+    const finalQrCodeData = rawPayload.slice(0, -4) + toTlv('63', crc);
+    const md5Hash = crypto.createHash('md5').update(finalQrCodeData).digest('hex');
+
+    return { qrCodeData: finalQrCodeData, md5Hash };
+  }
+
+  // Standard NBC Individual SDK format for other banks
+  try {
+    const expiresMs = Date.now() + 15 * 60 * 1000;
+    const info = new IndividualInfo(
+      merchantId,
+      safeMerchantName,
+      safeMerchantCity,
+      {
+        currency: khqrData.currency.usd,
+        amount: numAmount,
+        billNumber: safeOrderNumber,
+        storeLabel: 'RescueBite',
+        terminalLabel: 'Online',
+        expirationTimestamp: expiresMs,
+      }
+    );
+
+    const sdkResult = bakongSdk.generateIndividual(info);
+    if (sdkResult && sdkResult.data && sdkResult.data.qr) {
+      return {
+        qrCodeData: sdkResult.data.qr,
+        md5Hash: sdkResult.data.md5 || crypto.createHash('md5').update(sdkResult.data.qr).digest('hex'),
+      };
+    }
+  } catch (err) {
+    console.warn('[Bakong KHQR SDK] Generation warning:', err);
+  }
+
+  // Generic fallback
   const bakongAcctInfo = toTlv('00', 'bakongkh') + toTlv('01', merchantId);
-
-  // Construct main TLV sequence:
-  // 00: Payload Format Indicator ("01")
-  // 01: Point of Initiation Method ("12" for Dynamic QR with fixed amount)
-  // 29/30: Merchant Account Information
-  // 52: Merchant Category Code ("5812" for Eating Places / Restaurants)
-  // 53: Transaction Currency ("840" for USD)
-  // 54: Transaction Amount
-  // 58: Country Code ("KH")
-  // 59: Merchant Name (ASCII Fallback)
-  // 60: Merchant City
-  // 62: Additional Data Field (Bill/Order Number)
   let rawPayload =
     toTlv('00', '01') +
     toTlv('01', '12') +
-    toTlv('30', bakongAcctInfo) +
-    toTlv('52', '5812') +
+    toTlv('29', bakongAcctInfo) +
+    toTlv('52', '5999') +
     toTlv('53', '840') +
     toTlv('54', formattedAmount) +
     toTlv('58', 'KH') +
     toTlv('59', safeMerchantName) +
     toTlv('60', safeMerchantCity) +
-    toTlv('62', toTlv('01', safeOrderNumber));
+    toTlv('62', toTlv('01', safeOrderNumber)) +
+    tag64 +
+    '6304';
 
-  // Tag 64: Merchant Information - Language Template (for native Khmer script display in ABA / Bakong)
-  const nativeName = merchantNameKm || (/[^\x20-\x7E]/.test(merchantName) ? merchantName : null);
-  if (nativeName) {
-    const safeNativeName = safeUtf8ByteTruncate(nativeName.trim(), 50);
-    const safeNativeCity = safeUtf8ByteTruncate(merchantCityKm.trim(), 25);
-    const langTemplate =
-      toTlv('00', 'km') +
-      toTlv('01', safeNativeName) +
-      toTlv('02', safeNativeCity);
-    rawPayload += toTlv('64', langTemplate);
-  }
-
-  // Append Tag 63 Length (04) before computing CRC
-  rawPayload += '6304';
-
-  // Calculate standard 16-bit CRC checksum
   const crc = calculateCrc16(rawPayload);
   const finalQrCodeData = rawPayload.slice(0, -4) + toTlv('63', crc);
-
-  // Compute MD5 hash of raw QR payload for status lookup
   const md5Hash = crypto.createHash('md5').update(finalQrCodeData).digest('hex');
 
   return { qrCodeData: finalQrCodeData, md5Hash };
@@ -183,11 +239,19 @@ const khqrTransactions = new Map<
   }
 >();
 
-// 1. Generate Dynamic KHQR payload
-bakongRouter.post('/generate-khqr', (req, res) => {
-  const { amountUsd = 0, merchantName = 'RescueBite Merchant', orderNumber = 'RB-2026-000000', merchantId } = req.body;
+// 1. Generate dynamic KHQR token
+const handleGenerateKhqr = (req: any, res: any) => {
+  const cfg = getBakongConfig();
+  const {
+    amountUsd,
+    amount,
+    orderNumber = (req.body.orderId || `RB-${Date.now()}`),
+    merchantId,
+    merchantName = cfg.merchantName,
+  } = req.body;
 
-  const numUsd = typeof amountUsd === 'number' ? amountUsd : parseFloat(amountUsd) || 0;
+  const finalAmount = amountUsd != null ? amountUsd : amount;
+  const numUsd = typeof finalAmount === 'number' ? finalAmount : parseFloat(finalAmount) || 0;
   const khrRate = 4100;
   const amountKhr = Math.round(numUsd * khrRate);
 
@@ -215,31 +279,33 @@ bakongRouter.post('/generate-khqr', (req, res) => {
   res.json({
     success: true,
     qrCodeData,
+    qrString: qrCodeData,
     md5Hash,
     txId,
     expiresAt,
     amountUsd: numUsd,
     amountKhr,
     config: {
-      gateway: BAKONG_CONFIG.apiToken ? 'NBC_BAKONG_LIVE' : 'NBC_BAKONG_SANDBOX',
-      merchantId: merchantId || BAKONG_CONFIG.merchantId,
-      acquiringBank: BAKONG_CONFIG.acquiringBank,
+      gateway: cfg.apiToken ? 'NBC_BAKONG_LIVE' : 'NBC_BAKONG_SANDBOX',
+      merchantId: merchantId || cfg.merchantId,
+      acquiringBank: cfg.acquiringBank,
     },
   });
-});
+};
 
 // 2. Check status of KHQR (Supports both live NBC Open API and sandbox simulation)
 bakongRouter.get('/check-status/:md5Hash', async (req, res) => {
   const { md5Hash } = req.params;
+  const cfg = getBakongConfig();
 
   // If live Bakong API Token is configured in .env, check real NBC ledger
-  if (BAKONG_CONFIG.apiToken) {
+  if (cfg.apiToken) {
     try {
-      const response = await fetch(`${BAKONG_CONFIG.apiUrl}/check_transaction_by_md5`, {
+      const response = await fetch(`${cfg.apiUrl}/check_transaction_by_md5`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${BAKONG_CONFIG.apiToken}`,
+          Authorization: `Bearer ${cfg.apiToken}`,
         },
         body: JSON.stringify({ md5: md5Hash }),
       });
@@ -282,29 +348,53 @@ bakongRouter.get('/check-status/:md5Hash', async (req, res) => {
   });
 });
 
-// 3. Simulate scanning & paying in sandbox
-bakongRouter.post('/simulate-scan-pay', (req, res) => {
-  const { md5Hash } = req.body;
+// Aliases for KHQR endpoints
+bakongRouter.post('/generate-khqr', handleGenerateKhqr);
+bakongRouter.post('/khqr', handleGenerateKhqr);
+bakongRouter.get('/status/:md5Hash', (req, res) => {
+  const { md5Hash } = req.params;
   const tx = khqrTransactions.get(md5Hash);
+  if (!tx) {
+    return res.json({
+      status: 'PENDING',
+      paidAt: null,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    });
+  }
+  res.json({
+    status: tx.status,
+    paidAt: tx.paidAt,
+    expiresAt: tx.expiresAt,
+  });
+});
 
+const handleSimulatePayment = (req: any, res: any) => {
+  const md5Hash = req.body.md5Hash || req.body.md5 || req.body.hash;
+  if (!md5Hash) {
+    return res.status(400).json({ error: 'md5Hash is required for payment simulation' });
+  }
+  const tx = khqrTransactions.get(md5Hash);
   if (tx) {
     tx.status = 'SUCCESS';
     tx.paidAt = new Date().toISOString();
-  } else if (md5Hash) {
+  } else {
+    // Record sandbox transaction as success even if called with simulated hash
     khqrTransactions.set(md5Hash, {
-      orderNumber: 'RB-2026-SIMULATED',
-      amountUsd: 5.0,
-      amountKhr: 20500,
-      merchantName: 'RescueBite Partner',
+      orderNumber: req.body.orderNumber || `RB-SIM-${Date.now()}`,
+      amountUsd: 0,
+      amountKhr: 0,
+      merchantName: 'Sandbox Simulated Payment',
       status: 'SUCCESS',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       paidAt: new Date().toISOString(),
     });
   }
-
   res.json({
     success: true,
     status: 'SUCCESS',
     message: 'Payment simulation acknowledged.',
   });
-});
+};
+
+bakongRouter.post('/simulate-scan-pay', handleSimulatePayment);
+bakongRouter.post('/simulate-payment', handleSimulatePayment);
