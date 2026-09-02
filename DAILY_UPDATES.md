@@ -8,7 +8,17 @@
 
 ## 🚀 Summary of Key Accomplishments Today
 
-### 1. 🛡️ Atomic Checkout & Concurrency-Hardened Inventory Transaction
+### 1. 📍 Dynamic Real-Time Distance & Micro-Logistics Route Engine
+- **Accurate Real-Time Spatial Computations:**
+  - Implemented `computeDistanceKm` in `lib/utils.ts` supporting live customer GPS coordinates with fallback to city center coordinates (`CITY_COORDINATES` for Phnom Penh, Siem Reap, Battambang, Sihanoukville, Kampot).
+  - Resolved static `280 m` bug in `FoodCard.tsx` by eliminating hardcoded defaults and passing reactive `distanceKm` props across the explore feed and landing page grids.
+  - Added Tuk-Tuk / PassApp travel time estimates (`1.7 km · 7m Tuk-Tuk`, `4.7 km · 17m Tuk-Tuk`) to `StoreDetailPage.tsx`, `FoodDetailPage.tsx`, and `FoodDetailModal.tsx`.
+- **Cross-Table Backend Location Synchronization:**
+  - Synchronized `merchant_lat`, `merchant_lng`, and `merchant_address` in `rescue_bags` table upon `PATCH /api/merchants/:id` profile updates, ensuring instant dynamic recalculation for customers whenever a merchant edits their store coordinates.
+
+---
+
+### 2. 🛡️ Atomic Checkout & Concurrency-Hardened Inventory Transaction
 - **Single-Connection Transaction Atomicity:**
   - Hardened `POST /api/orders` in `order.routes.ts` with a single-connection `pg` client transaction (`BEGIN ... COMMIT / ROLLBACK`).
   - Guaranteed connection release on all paths (`finally { client.release() }`) preventing connection pool exhaustion under high traffic.
@@ -20,7 +30,7 @@
 
 ---
 
-### 2. 🎟️ Time-Limited Voucher Engine, DB Idempotency & Rewards Lifecycle
+### 3. 🎟️ Time-Limited Voucher Engine, DB Idempotency & Rewards Lifecycle
 - **Server-Authoritative Expiration & Idempotency:**
   - Designed `customer_vouchers` table with DB-enforced `expires_at`, `status IN ('ACTIVE','USED','EXPIRED')`, and unique constraint `idx_customer_vouchers_idempotency` preventing double points deduction on concurrent requests.
   - Integrated `FOR UPDATE` transaction locks during checkout to atomically mark vouchers as `USED` and safely rollback to `ACTIVE` if the order creation aborts.
@@ -30,14 +40,14 @@
 
 ---
 
-### 3. ⚡ Merchant Live Handover & Real-Time Counter Sync
+### 4. ⚡ Merchant Live Handover & Real-Time Counter Sync
 - **Optimistic State Updates:**
   - Connected `onCompleteOrder` across `App.tsx` and `MerchantView.tsx` so clicking **"Verify & Handover"** immediately transitions order state to `COMPLETED` without requiring manual page reloads.
   - Synchronized automatic status updates with backend `scanQrCode` verification endpoint.
 
 ---
 
-### 4. ⏰ Adjustable Pickup Hours for Fast Drops & Active Listings
+### 5. ⏰ Adjustable Pickup Hours for Fast Drops & Active Listings
 - **Backend Pickup Hours Endpoint:**
   - Implemented `PATCH /api/live-listings/:id` supporting live updates to `pickupStart`, `pickupEnd`, and quantity with automated server-side recalculation of `expires_at`.
 - **Merchant Controls:**
@@ -46,7 +56,7 @@
 
 ---
 
-### 5. ✏️ Product Edit Action in Merchant Menu Catalogue & Fast Drops
+### 6. ✏️ Product Edit Action in Merchant Menu Catalogue & Fast Drops
 - **Catalog Management:**
   - Added **"Edit"** (`✏️ Edit`) action button in the Master Menu Catalogue desktop table, mobile card stream, and Fast Drops grid.
   - Unified modal form dynamically pre-filling English & Khmer names, category, base price, batch quantity, unit, and product image.
@@ -54,7 +64,7 @@
 
 ---
 
-### 6. 🔍 Real-Time Order & Pickup Queue Filter Bar
+### 7. 🔍 Real-Time Order & Pickup Queue Filter Bar
 - **Tabbed Order Filtering:**
   - Added 5 responsive filter pill buttons: **All Orders**, **Ready for Pickup** (Pending), **Completed** (Handover Verified), **Cancelled / Voided**, and **No Review Yet**.
   - Dynamic badge counters compute exact filter stats in real-time via `useMemo`.
@@ -62,7 +72,7 @@
 
 ---
 
-### 7. 📊 Dedicated Merchant Executive Dashboard (`MerchantDashboardView.tsx`)
+### 8. 📊 Dedicated Merchant Executive Dashboard (`MerchantDashboardView.tsx`)
 - **Standalone Executive View:**
   - Decoupled high-level analytics from daily operations into a dedicated **Store Dashboard** view in the top navigation bar.
 - **Financial Recovery Ledger & Payout Settlement:**
@@ -76,13 +86,21 @@
 
 ---
 
-### 8. 📱 Mobile & iPhone Responsiveness Overhaul
+### 9. 📱 Mobile & iPhone Responsiveness Overhaul
 - **iOS-Style Segmented Navigation Bar:**
   - 3-column compact segmented bar with adaptive labels (`⚡ Rescue`, `📋 Menu`, `📦 Orders`) fitting 375px/390px iPhone viewports without wrapping.
 - **Touch-Friendly Action Grids:**
   - `Surprise Bag` and `Scan QR` buttons scale to full-width 2-column touch targets on mobile.
 - **Responsive Mobile Item Cards for Menu Catalog:**
   - Render crisp data table on desktop/tablet (`hidden md:block`) and native touch cards on iPhone (`md:hidden`) with thumbnail, batch info, and 1-tap action buttons.
+
+---
+
+### 10. 🧪 CI/CD Quality & TypeScript Build Verification
+- **Zero-Error Type Checking:**
+  - Resolved all CI/CD `npm run lint` (`tsc --noEmit`) build errors in `MerchantDashboardView.tsx`, `ImpactView.tsx`, and `types/index.ts`.
+  - Added complete exported interfaces for `Achievement`, `AchievementBadge`, `RewardItem`, `CategoryPreset`, and `SurplusForecast`.
+  - Verified 100% clean production builds across frontend and backend services.
 
 ---
 
@@ -101,13 +119,21 @@
 
 | Repository | File | Description |
 |---|---|---|
-| **Frontend** | `ReBite/src/components/MerchantView.tsx` | Added product Edit action, pickup hours customizer, order queue filter tabs (All, Pending, Completed, Cancelled, No Review), and realtime handover sync |
+| **Frontend** | `ReBite/src/lib/utils.ts` | Added `computeDistanceKm` and `CITY_COORDINATES` dictionary for dynamic Cambodian city distance calculations |
+| **Frontend** | `ReBite/src/components/FoodCard.tsx` | Fixed static distance fallback, dynamic meters/km formatting |
+| **Frontend** | `ReBite/src/components/CustomerView.tsx` | Passed dynamic distance prop to `FoodCard` and updated `getBagDistance` |
+| **Frontend** | `ReBite/src/components/LandingPage.tsx` | Integrated dynamic distance computation into landing explore grid |
+| **Frontend** | `ReBite/src/components/StoreDetailPage.tsx` | Added live Tuk-Tuk/PassApp route estimates and dynamic distance badge |
+| **Frontend** | `ReBite/src/components/FoodDetailPage.tsx` | Added route duration and distance info in merchant header |
+| **Frontend** | `ReBite/src/components/FoodDetailModal.tsx` | Dynamic distance resolution using live GPS coords or city center |
+| **Frontend** | `ReBite/src/types/index.ts` | Added `AchievementBadge`, `Achievement`, `RewardItem`, `CategoryPreset`, and updated `SurplusForecast` |
+| **Frontend** | `ReBite/src/components/MerchantDashboardView.tsx` | Fixed `storeBags` reference and typecheck compliance for CI/CD |
+| **Frontend** | `ReBite/src/components/MerchantView.tsx` | Added product Edit action, pickup hours customizer, order queue filter tabs, and realtime handover sync |
 | **Frontend** | `ReBite/src/components/RewardsView.tsx` | Fixed rewards catalog tab badge count, points history connected to user wallet |
 | **Frontend** | `ReBite/src/components/CheckoutView.tsx` | Added voucher discount calculation, time-limited expiry validation display |
 | **Frontend** | `ReBite/src/services/api.ts` | Added `updateLiveListing`, `updateMenuItem`, `getMyVouchers`, and voucher validation APIs |
-| **Frontend** | `ReBite/src/App.tsx` | Wired `onCompleteOrder` into `MerchantView` for live reactive state updates |
-| **Frontend** | `ReBite/src/components/MerchantDashboardView.tsx` | Executive Dashboard with Financial Ledger, Impact KPIs, AI Forecasting |
-| **Frontend** | `ReBite/src/components/Header.tsx` | Added `Store Dashboard` navigation in desktop navbar & mobile drawer |
+| **Frontend** | `ReBite/src/App.tsx` | Wired dynamic distance props to landing page and optimistic location updates to bags |
+| **Backend** | `backend/src/routes/merchant.routes.ts` | Cross-table update synchronizing `rescue_bags` location and address on merchant edit |
 | **Backend** | `backend/src/routes/liveListing.routes.ts` | Added `PATCH /api/live-listings/:id` for pickup window and stock quantity updates |
 | **Backend** | `backend/src/routes/voucher.routes.ts` | Added time-limited voucher issuance, validation, and points redemption endpoints |
 | **Backend** | `backend/src/routes/order.routes.ts` | Single-connection atomic transaction, voucher FOR UPDATE locking and rollback safety |

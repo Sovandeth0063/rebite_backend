@@ -290,6 +290,29 @@ const handleUpdateMerchant = async (req: AuthenticatedRequest, res: any) => {
       ]
     );
 
+    // Synchronize merchant location, address, name and logo across all associated rescue bags
+    const newLat = data.latitude !== undefined ? data.latitude : (data.lat !== undefined ? data.lat : null);
+    const newLng = data.longitude !== undefined ? data.longitude : (data.lng !== undefined ? data.lng : null);
+    if (newLat != null || newLng != null || data.address || data.businessName || data.logoUrl) {
+      await pool.query(
+        `UPDATE rescue_bags
+         SET merchant_lat = COALESCE($1, merchant_lat),
+             merchant_lng = COALESCE($2, merchant_lng),
+             merchant_address = COALESCE($3, merchant_address),
+             merchant_name = COALESCE($4, merchant_name),
+             merchant_logo = COALESCE($5, merchant_logo)
+         WHERE merchant_id = $6`,
+        [
+          newLat,
+          newLng,
+          data.address || null,
+          data.businessName || null,
+          data.logoUrl || null,
+          req.params.id,
+        ]
+      );
+    }
+
     const updated = await queryOne('SELECT * FROM merchants WHERE id = $1', [req.params.id]);
     res.json({
       id: updated.id,
