@@ -500,7 +500,7 @@ export const DEMO_RESCUE_BAGS: RescueBag[] = [
     description_en: 'Assorted Japanese fresh cream Swiss rolls (matcha green tea, chocolate, vanilla) and light sponge chiffon cakes.',
     description_km: 'នំស្វីសរ៉ូលគ្រីមស្រស់ជប៉ុន (ម៉ាត់ឆា សូកូឡា វ៉ានីឡា) និងនំខេកស្ពោតទន់ៗ។',
     category: 'Cakes & Swiss Rolls',
-    imageUrl: 'https://images.unsplash.com/photo-1535141192574-5d4897c13136?w=600',
+    imageUrl: '/images/breadtalk_swiss_roll.jpg',
     originalPrice: 10.0,
     rescuePrice: 4.0,
     discountPercentage: 60,
