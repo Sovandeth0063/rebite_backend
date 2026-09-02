@@ -207,13 +207,25 @@ orderRouter.get('/', async (req: AuthenticatedRequest, res) => {
     let sql = 'SELECT * FROM orders WHERE 1=1';
     const params: any[] = [];
 
+    // If requested by a MERCHANT, strictly scope to orders belonging to this merchant's stores
+    if (req.currentUser && req.currentUser.role === 'MERCHANT') {
+      const merchantStores = await query<{ id: string }>('SELECT id FROM merchants WHERE user_id = $1', [req.currentUser.id]);
+      const storeIds = merchantStores.map((m) => m.id);
+      if (storeIds.length > 0) {
+        params.push(storeIds);
+        sql += ` AND merchant_id = ANY($${params.length})`;
+      } else {
+        params.push(req.currentUser.id);
+        sql += ` AND (merchant_id = $${params.length} OR merchant_id IN (SELECT id FROM merchants WHERE user_id = $${params.length}))`;
+      }
+    } else if (merchantId) {
+      params.push(merchantId);
+      sql += ` AND merchant_id = $${params.length}`;
+    }
+
     if (customerId) {
       params.push(customerId);
       sql += ` AND customer_id = $${params.length}`;
-    }
-    if (merchantId) {
-      params.push(merchantId);
-      sql += ` AND merchant_id = $${params.length}`;
     }
     if (status) {
       params.push(status);
@@ -221,9 +233,7 @@ orderRouter.get('/', async (req: AuthenticatedRequest, res) => {
     }
 
     sql += ' ORDER BY created_at DESC';
-    console.log('[DEBUG GET /orders] Executing SQL:', sql, 'with params:', params);
     const rows = await query(sql, params);
-    console.log('[DEBUG GET /orders] Returning rows count:', rows.length);
     res.json(rows.map(formatOrder));
   } catch (err) {
     console.error('[DEBUG GET /orders] Query error:', err);
@@ -252,27 +262,65 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1. Atomic inventory deduction (prevents concurrent overselling race conditions)
+    // 1. Atomic inventory deduction (supports both Live Drops & Surprise Bags)
     const requestedQty = Math.max(1, parseInt(quantity, 10) || 1);
-    const result = await client.query(
-      `UPDATE rescue_bags
-       SET quantity_remaining = quantity_remaining - $1,
-           visibility = CASE WHEN quantity_remaining - $1 <= 0 THEN 'SOLD_OUT' ELSE visibility END
-       WHERE id = $2 AND quantity_remaining >= $1
-       RETURNING *`,
-      [requestedQty, rescueBagId]
-    );
+    const isLiveListing = typeof rescueBagId === 'string' && rescueBagId.startsWith('live_');
+    let bag: any = null;
 
-    console.log('[ORDER DEBUG]', { rescueBagId, requestedQty, rowCount: result.rowCount, remaining: result.rows[0]?.quantity_remaining });
-
-    if (result.rowCount === 0 || !result.rows[0]) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({
-        error: 'Sorry, this surplus bag was just claimed by another customer or is sold out.',
-      });
+    if (isLiveListing) {
+      const liveResult = await client.query(
+        `UPDATE live_listings
+         SET quantity_left = quantity_left - $1,
+             status = CASE WHEN quantity_left - $1 <= 0 THEN 'SOLD_OUT' ELSE status END
+         WHERE id = $2 AND quantity_left >= $1
+         RETURNING *`,
+        [requestedQty, rescueBagId]
+      );
+      if (liveResult.rowCount && liveResult.rows[0]) {
+        const r = liveResult.rows[0];
+        bag = {
+          id: r.id,
+          merchant_id: r.merchant_id,
+          merchant_name: r.merchant_name,
+          merchant_logo: r.merchant_logo,
+          merchant_address: r.merchant_address,
+          title: r.item_name,
+          rescue_price: r.rescue_price,
+          pickup_start: r.pickup_start || '17:30',
+          pickup_end: r.pickup_end || '20:30',
+        };
+      }
+    } else {
+      const result = await client.query(
+        `UPDATE rescue_bags
+         SET quantity_remaining = quantity_remaining - $1,
+             visibility = CASE WHEN quantity_remaining - $1 <= 0 THEN 'SOLD_OUT' ELSE visibility END
+         WHERE id = $2 AND quantity_remaining >= $1
+         RETURNING *`,
+        [requestedQty, rescueBagId]
+      );
+      if (result.rowCount && result.rows[0]) {
+        const r = result.rows[0];
+        bag = {
+          id: r.id,
+          merchant_id: r.merchant_id,
+          merchant_name: r.merchant_name,
+          merchant_logo: r.merchant_logo,
+          merchant_address: r.merchant_address,
+          title: r.title,
+          rescue_price: r.rescue_price,
+          pickup_start: r.pickup_start || '17:30',
+          pickup_end: r.pickup_end || '20:30',
+        };
+      }
     }
 
-    const bag = result.rows[0];
+    if (!bag) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Sorry, this surplus item was just claimed by another customer or is sold out.',
+      });
+    }
 
     const unitPrice = parseFloat(bag.rescue_price);
     const subtotal = unitPrice * requestedQty;
@@ -357,24 +405,39 @@ orderRouter.post('/', async (req: AuthenticatedRequest, res) => {
       ]
     );
 
-    // Update impact stats (safely handled)
-    await client.query(
-      `UPDATE impact_stats
-       SET meals_rescued = meals_rescued + $1,
-           food_saved_kg = food_saved_kg + ($1 * 0.75),
-           customer_savings_usd = customer_savings_usd + ($1 * ($2 - $3)),
-           co2_avoided_kg = co2_avoided_kg + ($1 * 1.8)
-       WHERE id = (SELECT id FROM impact_stats LIMIT 1)`,
-      [requestedQty, parseFloat(bag.original_price), parseFloat(bag.rescue_price)]
-    ).catch(() => {});
-
-    // Award user points
-    await client.query('UPDATE users SET points = points + ($1 * 10) WHERE id = $2', [requestedQty, user.id]).catch(() => {});
-
+    // Commit primary order creation & inventory lock immediately
     await client.query('COMMIT');
     console.log('[DEBUG POST /orders] Successfully committed order:', insertedOrderRes.rows[0]?.order_number);
 
     const createdOrder = insertedOrderRes.rows[0];
+
+    // Secondary async updates outside transaction
+    try {
+      const origP = parseFloat(bag.original_price) || 5.0;
+      const rescP = parseFloat(bag.rescue_price) || 2.5;
+      const savingsPerMeal = Math.max(0, origP - rescP);
+
+      await pool.query(
+        `UPDATE impact_stats
+         SET meals_rescued = meals_rescued + $1,
+             food_saved_kg = food_saved_kg + ($1 * 0.75),
+             customer_savings_usd = customer_savings_usd + ($1 * $2),
+             co2_avoided_kg = co2_avoided_kg + ($1 * 1.8)
+         WHERE id = (SELECT id FROM impact_stats LIMIT 1)`,
+        [requestedQty, savingsPerMeal]
+      );
+    } catch (e: any) {
+      console.warn('Impact stats update warning:', e.message);
+    }
+
+    try {
+      if (user?.id) {
+        await pool.query('UPDATE users SET points = points + $1 WHERE id = $2', [requestedQty * 10, user.id]);
+      }
+    } catch (e: any) {
+      console.warn('User points award warning:', e.message);
+    }
+
     res.status(201).json(formatOrder(createdOrder));
   } catch (err: any) {
     await client.query('ROLLBACK');
@@ -439,14 +502,19 @@ orderRouter.post('/scan-qr', async (req, res) => {
   }
 
   const clean = code.trim();
+  const stripped = clean.replace(/^#/, '');
   try {
     const order = await queryOne(
       `SELECT * FROM orders 
        WHERE UPPER(pickup_code) = UPPER($1) 
-          OR order_number = $1 
-          OR qr_code_data = $1 
-          OR id = $1`,
-      [clean]
+          OR UPPER(pickup_code) = UPPER($2)
+          OR UPPER(order_number) = UPPER($1) 
+          OR UPPER(order_number) = UPPER($2)
+          OR UPPER(qr_code_data) = UPPER($1) 
+          OR UPPER(qr_code_data) = UPPER($2)
+          OR id = $1 
+          OR id = $2`,
+      [clean, stripped]
     );
 
     if (!order) {

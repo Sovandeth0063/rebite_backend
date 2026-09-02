@@ -35,9 +35,19 @@ export async function authMiddleware(req: AuthenticatedRequest, res: Response, n
           points: u.points,
           referralCode: u.referral_code,
           referredBy: u.referred_by,
-          savedStoreIds: u.saved_store_ids || [],
+          savedStoreIds:
+            typeof u.saved_store_ids === 'string'
+              ? JSON.parse(u.saved_store_ids)
+              : u.saved_store_ids || [],
           createdAt: u.created_at,
-        };
+          trustScore: u.trust_score !== undefined ? u.trust_score : 75,
+          cashStrikes: u.cash_strikes || 0,
+          consecutiveCleanPickups: u.consecutive_clean_pickups || 0,
+          cashStrikesHistory:
+            typeof u.cash_strikes_history === 'string'
+              ? JSON.parse(u.cash_strikes_history)
+              : u.cash_strikes_history || [],
+        } as any;
         return next();
       }
     }

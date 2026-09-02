@@ -65,6 +65,21 @@ export async function setupDatabase(forceRecreate: boolean = false) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS cash_strikes INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS consecutive_clean_pickups INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS cash_strikes_history JSONB DEFAULT '[]'::jsonb;
+
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS composition_tags JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS dietary_tags JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS allergens JSONB DEFAULT '[]'::jsonb;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS estimated_item_count VARCHAR(50);
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS allergen_disclaimer TEXT;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS storage_instructions TEXT;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS min_items INTEGER DEFAULT 1;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS max_items INTEGER DEFAULT 5;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS visibility VARCHAR(50) DEFAULT 'PUBLIC';
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS safety_confirmed BOOLEAN DEFAULT TRUE;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS has_auto_escalating_discount BOOLEAN DEFAULT FALSE;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS escalated_discount_percentage INTEGER;
+    ALTER TABLE rescue_bags ADD COLUMN IF NOT EXISTS escalate_minutes_before_end INTEGER;
   `);
 
   console.log('[PostgreSQL] Schema applied successfully.');
@@ -302,22 +317,107 @@ export async function setupDatabase(forceRecreate: boolean = false) {
 
     // 9. Seed Menu Items for Live Menu Fast Listing
     const SAMPLE_MENU_ITEMS = [
-      { id: 'menu_item_1', merchantId: 'mer_labrioche', name: 'Artisan Butter Croissant', nameKm: 'នំប៉័ងក្រូសង់ប៊ឺរ', category: 'Bakery', basePrice: 2.50, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
-      { id: 'menu_item_2', merchantId: 'mer_labrioche', name: 'Pain au Chocolat', nameKm: 'នំប៉័ងសូកូឡាបារាំង', category: 'Bakery', basePrice: 2.80, imageUrl: 'https://images.unsplash.com/photo-1530610476181-d83430b64dcd?w=400' },
-      { id: 'menu_item_3', merchantId: 'mer_labrioche', name: 'French Baguette Tradition', nameKm: 'នំប៉័ងបាហ្គែតបារាំង', category: 'Bakery', basePrice: 1.80, imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=400' },
-      { id: 'menu_item_4', merchantId: 'mer_khema', name: 'Quiche Lorraine Maison', nameKm: 'នំគីសសាច់ជ្រូកបារាំង', category: 'Bakery', basePrice: 4.50, imageUrl: 'https://images.unsplash.com/photo-1565958011703-44f9829ba187?w=400' },
-      { id: 'menu_item_5', merchantId: 'mer_gerbies', name: 'Gourmet Chicken Caesar Wrap', nameKm: 'រ៉េបមាន់សេសា', category: 'Meals', basePrice: 4.80, imageUrl: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=400' },
-      { id: 'menu_item_6', merchantId: 'mer_breadtalk', name: 'Signature Pork Flosss Bun', nameKm: 'នំប៉័ងសាច់ផាត់', category: 'Bakery', basePrice: 2.20, imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400' },
-      { id: 'menu_item_7', merchantId: 'mer_taties', name: 'Almond Frangipane Croissant', nameKm: 'ក្រូសង់អាល់ម៉ុន', category: 'Bakery', basePrice: 3.20, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
-      { id: 'menu_item_8', merchantId: 'mer_ausbake', name: 'Rustic Country Sourdough', nameKm: 'នំប៉័ងសូដូសិប្បកម្ម', category: 'Bakery', basePrice: 4.20, imageUrl: 'https://images.unsplash.com/photo-1586444248902-2f64eddc13df?w=400' },
+      { id: 'menu_item_1', merchantId: 'mer_bayon', name: 'Fresh Almond Croissant Box (4-Pack)', nameKm: 'ប្រអប់នំក្រូសង់អាល់ម៉ុន ៤ដុំ', category: 'Bakery', basePrice: 10.00, imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400' },
+      { id: 'menu_item_2', merchantId: 'mer_bayon', name: 'Warm Sausage & Cheese Puff Pastry Duo', nameKm: 'នំផាហ្វសាច់ក្រក និងឈីស ២ដុំ', category: 'Bakery', basePrice: 6.00, imageUrl: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?w=400' },
+      { id: 'menu_item_3', merchantId: 'mer_bayon', name: 'French Baguette Tradition', nameKm: 'នំប៉័ងបាហ្គែតបារាំង', category: 'Bakery', basePrice: 1.80, imageUrl: 'https://images.unsplash.com/photo-1589367920969-ab8e050bbb04?w=400' },
+      { id: 'menu_item_4', merchantId: 'mer_breadtalk', name: 'Signature Chicken Flosss Bun', nameKm: 'នំប៉័ងសាច់ផាត់មាន់', category: 'Bakery', basePrice: 2.50, imageUrl: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=400' },
+      { id: 'menu_item_5', merchantId: 'mer_breadtalk', name: 'Golden Lava Salted Egg Bun (3-Pack)', nameKm: 'នំឡាវ៉ាពងទាប្រៃ ៣ដុំ', category: 'Bakery', basePrice: 6.50, imageUrl: 'https://images.unsplash.com/photo-1568254183919-78a4f43a2877?w=400' },
+      { id: 'menu_item_6', merchantId: 'mer_breadtalk', name: 'Korean Cream Cheese Garlic Bread', nameKm: 'នំប៉័ងខ្ទឹមបារាំងគ្រីមឈីស', category: 'Bakery', basePrice: 3.50, imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400' },
     ];
 
     for (const item of SAMPLE_MENU_ITEMS) {
       await pool.query(
         `INSERT INTO menu_items (id, merchant_id, name, name_km, category, base_price, image_url, is_active, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO UPDATE SET
+           merchant_id = EXCLUDED.merchant_id,
+           name = EXCLUDED.name,
+           name_km = EXCLUDED.name_km,
+           category = EXCLUDED.category,
+           base_price = EXCLUDED.base_price,
+           image_url = EXCLUDED.image_url`,
         [item.id, item.merchantId, item.name, item.nameKm, item.category, item.basePrice, item.imageUrl]
+      );
+    }
+
+    // 9b. Seed Live Drops (Flash Listings)
+    const SAMPLE_LIVE_DROPS = [
+      {
+        id: 'live_bayon_1',
+        merchantId: 'mer_bayon',
+        menuItemId: 'menu_item_1',
+        merchantName: 'Bayon Bakery (Mao Tse Toung)',
+        merchantLogo: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200',
+        merchantLat: 11.5435,
+        merchantLng: 104.9125,
+        merchantAddress: 'No. 331, Mao Tse Toung Blvd (St. 245), Chamkarmon',
+        itemName: 'Fresh Almond Croissant Box (4-Pack)',
+        itemNameKm: 'ប្រអប់នំក្រូសង់អាល់ម៉ុន ៤ដុំ',
+        imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400',
+        quantityLeft: 3,
+        discountPct: 50,
+        rescuePrice: 5.00,
+        originalPrice: 10.00,
+        expiresAt: new Date(Date.now() + 10 * 3600 * 1000).toISOString(),
+        pickupStart: '17:30',
+        pickupEnd: '20:30',
+        status: 'LIVE',
+      },
+      {
+        id: 'live_breadtalk_1',
+        merchantId: 'mer_breadtalk',
+        menuItemId: 'menu_item_5',
+        merchantName: 'BreadTalk (TK Avenue)',
+        merchantLogo: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=200',
+        merchantLat: 11.5878,
+        merchantLng: 104.8986,
+        merchantAddress: 'TK Avenue Mall, St. 315 & St. 516, Toul Kork',
+        itemName: 'Golden Lava Salted Egg Bun (3-Pack)',
+        itemNameKm: 'នំឡាវ៉ាពងទាប្រៃ ៣ដុំ',
+        imageUrl: 'https://images.unsplash.com/photo-1568254183919-78a4f43a2877?w=400',
+        quantityLeft: 4,
+        discountPct: 50,
+        rescuePrice: 3.25,
+        originalPrice: 6.50,
+        expiresAt: new Date(Date.now() + 10 * 3600 * 1000).toISOString(),
+        pickupStart: '18:00',
+        pickupEnd: '21:00',
+        status: 'LIVE',
+      },
+    ];
+
+    for (const drop of SAMPLE_LIVE_DROPS) {
+      await pool.query(
+        `INSERT INTO live_listings (id, merchant_id, menu_item_id, merchant_name, merchant_logo, merchant_lat, merchant_lng, merchant_address, item_name, item_name_km, image_url, quantity_left, discount_pct, rescue_price, original_price, expires_at, pickup_start, pickup_end, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET
+           merchant_id = EXCLUDED.merchant_id,
+           item_name = EXCLUDED.item_name,
+           original_price = EXCLUDED.original_price,
+           rescue_price = EXCLUDED.rescue_price,
+           quantity_left = EXCLUDED.quantity_left,
+           status = EXCLUDED.status`,
+        [
+          drop.id,
+          drop.merchantId,
+          drop.menuItemId,
+          drop.merchantName,
+          drop.merchantLogo,
+          drop.merchantLat,
+          drop.merchantLng,
+          drop.merchantAddress,
+          drop.itemName,
+          drop.itemNameKm,
+          drop.imageUrl,
+          drop.quantityLeft,
+          drop.discountPct,
+          drop.rescuePrice,
+          drop.originalPrice,
+          drop.expiresAt,
+          drop.pickupStart,
+          drop.pickupEnd,
+          drop.status,
+        ]
       );
     }
 
@@ -327,7 +427,14 @@ export async function setupDatabase(forceRecreate: boolean = false) {
         `INSERT INTO category_presets (id, business_type, name_en, name_km, icon, order_index, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
          ON CONFLICT (id) DO NOTHING`,
-        [preset.id, preset.businessType, preset.nameEn, preset.nameKm, preset.icon, preset.orderIndex]
+        [
+          preset.id,
+          preset.businessType,
+          preset.nameEn,
+          preset.nameKm,
+          preset.icon,
+          preset.orderIndex,
+        ]
       );
     }
 

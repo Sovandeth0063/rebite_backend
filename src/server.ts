@@ -139,7 +139,14 @@ app.post('/api/favorites/toggle', async (req: AuthenticatedRequest, res) => {
   const userId = req.currentUser?.id || (req.headers['x-user-id'] as string) || 'usr_customer';
   try {
     const user = await queryOne('SELECT saved_store_ids FROM users WHERE id = $1', [userId]);
-    let savedStoreIds: string[] = user?.saved_store_ids || [];
+    let savedStoreIds: string[] = [];
+    if (user?.saved_store_ids) {
+      savedStoreIds = Array.isArray(user.saved_store_ids)
+        ? user.saved_store_ids
+        : typeof user.saved_store_ids === 'string'
+        ? JSON.parse(user.saved_store_ids)
+        : [];
+    }
 
     if (savedStoreIds.includes(merchantId)) {
       savedStoreIds = savedStoreIds.filter((id) => id !== merchantId);

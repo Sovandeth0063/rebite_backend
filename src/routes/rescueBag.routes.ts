@@ -255,14 +255,11 @@ rescueBagRouter.post('/', async (req: AuthenticatedRequest, res) => {
       ]
     );
 
-    // Trigger async translation
-    asyncTranslateRescueBag(bagId);
-
     const created = await queryOne('SELECT * FROM rescue_bags WHERE id = $1', [bagId]);
     res.status(201).json(formatRescueBag(created));
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error creating rescue bag:', err);
-    res.status(500).json({ error: 'Failed to create rescue bag' });
+    res.status(500).json({ error: err?.message || 'Failed to create rescue bag' });
   }
 });
 
